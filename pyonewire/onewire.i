@@ -29,6 +29,21 @@ typedef struct
 
 %}
 
+//
+// exceptions
+//
+
+// this makes all wrapped functions capable of running along in their own
+// threads. otherwise, the wrapper would hold the python GIL and multi-threaded
+// stuff would not work.
+//
+// safe because our C doesn't access any python
+%exception {
+   Py_BEGIN_ALLOW_THREADS
+   $function
+   Py_END_ALLOW_THREADS
+}
+
 // 
 // typemaps
 //
@@ -198,21 +213,32 @@ typedef struct
    else
      return Py_BuildValue("");
  }
+
+ PyObject *my_ReadTemperature(int portnum, uchar *SerialNum) {
+   int res = 0;
+   float temp = 0.0;
+   res = ReadTemperature(portnum, SerialNum, &temp);
+   if (res == 0) {
+      Py_INCREF(Py_None);
+      return Py_None;
+   }
+   else {
+      return Py_BuildValue("f",temp);
+   }
+ }
 %}
 
+// TODO -- these can be re written as they are no longer necessary; used to be
+// here because of explicit Py_Begin_threads macros
 %{
   PyObject *myOwFirst(int portnum, int do_reset, int alarm_only) {
      int ret;
-     Py_BEGIN_ALLOW_THREADS
      ret = owFirst(portnum,do_reset,alarm_only);
-     Py_END_ALLOW_THREADS
      return Py_BuildValue("i",ret);
   }
   PyObject *myOwNext(int portnum, int do_reset, int alarm_only) {
      int ret;
-     Py_BEGIN_ALLOW_THREADS
      ret = owNext(portnum,do_reset,alarm_only);
-     Py_END_ALLOW_THREADS
      return Py_BuildValue("i",ret);
   }
 %}
@@ -293,6 +319,7 @@ int owWriteFile(int portnum, uchar *INSNum, short hnd, uchar *INbuf, int len);
 /* Extra Features */
 
 extern int ReadTemperature(int, uchar*, float*Temp);
+PyObject *my_ReadTemperature(int, uchar*);
 
 /* Error handling */
 extern int owGetErrorNum(void);

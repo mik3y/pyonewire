@@ -125,7 +125,7 @@ class onewirenet:
    #
 
    def ReadTemperature(self,ID):
-      return _onewire.ReadTemperature(self.portn,ID)
+      return _onewire.my_ReadTemperature(self.portn,ID)
 
    #
    # utility functions: error functions

@@ -15,7 +15,7 @@ MISCOBJS = dallas/temp10.o
 all: _onewiremodule.so
 
 install: _onewiremodule.so
-	cp onewiremodule.so onewire.py $(PYSITEPACKAGES)
+	cp _onewiremodule.so onewire.py $(PYSITEPACKAGES)
 
 onewire_wrap.c: onewire.i
 	swig -python onewire.i
