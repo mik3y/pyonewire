@@ -48,11 +48,21 @@ typedef struct
 // typemaps
 //
 
+// for owSerialNum
 %typemap(python,argout) uchar *serialnum_buf {
    $result = Py_BuildValue("s#",$1, 8);
+   free($1);
+}
+%typemap(python,in) uchar *serialnum_buf {
+   $1 = malloc(16*sizeof(char));
 }
 
-
+// for everything else
+// XXX - check that we really need to free?
+%typemap(python,argout) uchar * {
+   $result = Py_BuildValue("s#",$1, 8);
+   // free($1); // XXX -- might be needed... must go over uchar* usage
+}
 %typemap(python,in) uchar * {
    if (!PyString_Check($input)) {
       PyErr_SetString(PyExc_TypeError,"serialnum not a string");
@@ -185,7 +195,7 @@ typedef struct
    if ($1 != NULL)
       $result = Py_BuildValue("i",*$1);
    else 
-      $result = Py_None;
+      $result = Py_BuildValue(""); // Py_None, basically
    free($1);
 }
 %typemap(python,in,numinputs=0) short * { short *temp_hnd = malloc(sizeof(short)); $1 = temp_hnd; }
@@ -219,8 +229,7 @@ typedef struct
    float temp = 0.0;
    res = ReadTemperature(portnum, SerialNum, &temp);
    if (res == 0) {
-      Py_INCREF(Py_None);
-      return Py_None;
+      return Py_BuildValue(""); // Py_None
    }
    else {
       return Py_BuildValue("f",temp);

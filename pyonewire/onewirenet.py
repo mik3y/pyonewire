@@ -13,7 +13,9 @@ class onewirenet:
          while _onewire.owHasErrors():
             _onewire.owPrintErrorMsgStd()
          raise IOError, "Unable to attach to one wire network"
+      print "setting overdrive"
       self.setOverdrive(0)
+      print "refresh.."
       self.ibuttons = self.refresh()
 
    def setOverdrive(self,od=1):
@@ -36,10 +38,10 @@ class onewirenet:
    def refresh(self):
 
       ibs = []
-      rlst =  _onewire.owFirst(self.portn,1,0)
+      rlst =  _onewire.myOwFirst(self.portn,1,0)
       while rlst:
          ibs.append(ibutton(self,_onewire.owSerialNum(self.portn,"",1)))
-         rlst = _onewire.owNext(self.portn,1,0)
+         rlst = _onewire.myOwNext(self.portn,1,0)
 
       return ibs
 
