@@ -1,0 +1,34 @@
+README
+------------------------------------------------------------------------
+
+this is the pyonewire module. it is based on nick piper's python-onewire
+module. eventually, nick plans to incorporate those changes back in to his
+module, but this repository servers as a temporary placeholder for my changes.
+it's not really a fork, but i am maintianing it for some specific reasons.
+
+the main objectives of pyonewire are:
+
+   - to improve nick's original code to be a more suitable general-purpose
+     onewire/ibutton inferface. (nick's version 0.0.1 is a useful feature
+     demonstration, whereas this aims to mature its usability siginificantly)
+   - to maintain the wrapped code with new releases from dallas
+   - to realize, in python, all the features available in the C examples
+     provided by dallas -- in an elegant, pythonic fashion
+
+summary of improvements & additions versus python-onewire 0.0.1:
+
+   - cleaned up (or sullied?) interface file to be compatible with latest
+     version of SWIG.
+   - dallas ib-ide source code updated to version 3.0b2 (latest available)
+   - ibutton class restructured with ibutton-specific classes in mind. more
+     object oriented
+   - onewirenet rewritten to support network transparency and threadsafety; the
+     underlying hardware interface (as definted by the swig-generated
+     _onewirenet module) is no longer tied to the onewirenet module.
+
+future plans may not be in this list; please see TODO for that purpose.
+
+python-onewire is probably GPL, (c) nick piper
+pyonewire is therefore GPL, (c) nick piper & mike wakerly
+
+i can be reached at mike (at) wakerly (dot) com

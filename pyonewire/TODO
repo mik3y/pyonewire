@@ -1,0 +1,17 @@
+- ibuttons.cfg should be replaced with a better format, or kept as-is, and
+  completed
+- need the ibutton classes to reflect capabilities, perhaps with subclassing?
+  or perhaps just keeping the supports() function.
+- some exceptions should be added to replace dallas OW_ERRORs; make error
+  handling more pythonic
+- test some edge cases: no filesystem exists but device supports fs (XXX -
+  dallas library weakness atm?), etc..
+- add support for thermochron, sha, other button functionalities. (more wrapping!)
+- clean up typemaps - may be a bit of a mess since tar disaster!
+- use distutils compile/install -- though swig support is kinda lousy. at
+  minimum, autodetect python library path. (shoot, does this mean Automake??)
+- network transparency. fooled around with an xml-rpc onewirenet
+  implementation, but it can't handle abstract data types. which leaves us
+  with: CORBA, or make all returns of onewirenet abstract? (ie, no ibutton
+  classes)? XXX -- are you serious, xml-rpc can't marshall simple classes?!
+- esoteric: re-sync dallas source trees to remove my printf-debug mtimes?
