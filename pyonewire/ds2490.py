@@ -12,6 +12,8 @@ In this first pass of rewrite, little attempt has been made to refactor or
 clarify the original Dallas code (which is mostly well written anyway.)
 """
 
+import struct
+import sys
 import time
 
 import cstruct
@@ -19,6 +21,15 @@ import usb
 import libusb
 
 ### defines - from libusbds2490.c
+
+# status flags
+STATUSFLAGS_SPUA = 0x01  # if set Strong Pull-up is active
+STATUSFLAGS_PRGA = 0x02  # if set a 12V programming pulse is being generated
+STATUSFLAGS_12VP = 0x04  # if set the external 12V programming voltage is present
+STATUSFLAGS_PMOD = 0x08  # if set the DS2490 powered from USB and external sources
+STATUSFLAGS_HALT = 0x10  # if set the DS2490 is currently halted
+STATUSFLAGS_IDLE = 0x20  # if set the DS2490 is currently idle
+
 
 # Request byte, Command Type Code Constants 
 CONTROL_CMD = 0x00
@@ -143,11 +154,23 @@ FAMILY_CODE_04_ALARM_TOUCHRESET_COMPLIANCE = 1
 DS2490_EP1 = 0x81
 DS2490_EP2 = 0x02
 DS2490_EP3 = 0x83
+# Result Registers
+ONEWIREDEVICEDETECT = 0xA5  # 1-Wire device detected on bus
+COMMCMDERRORRESULT_NRS = 0x01  # if set 1-WIRE RESET did not reveal a Presence Pulse or SET PATH did not get a Presence Pulse from the branch to be connected
+COMMCMDERRORRESULT_SH  = 0x02  # if set 1-WIRE RESET revealed a short on the 1-Wire bus or the SET PATH couln not connect a branch due to short
+COMMCMDERRORRESULT_APP = 0x04  # if set a 1-WIRE RESET revealed an Alarming Presence Pulse
+COMMCMDERRORRESULT_VPP =          0x08  # if set during a PULSE with TYPE=1 or WRITE EPROM command the 12V programming pulse not seen on 1-Wire bus
+COMMCMDERRORRESULT_CMP =          0x10  # if set there was an error reading confirmation byte of SET PATH or WRITE EPROM was unsuccessful
+COMMCMDERRORRESULT_CRC =          0x20  # if set a CRC occurred for one of the commands: WRITE SRAM PAGE, WRITE EPROM, READ EPROM, READ CRC PROT PAGE, or READ REDIRECT PAGE W/CRC
+COMMCMDERRORRESULT_RDP =          0x40  # if set READ REDIRECT PAGE WITH CRC encountered a redirected page
+COMMCMDERRORRESULT_EOS =          0x80  # if set SEARCH ACCESS with SM=1 ended sooner than expected with too few ROM IDs
+
+
 
 
 def SetupPacket():
-   return cstruct.cStruct(( ('C', 'RequestTypeReservedBits'),
-                            ('C', 'Request'),
+   return cstruct.cStruct(( ('B', 'RequestTypeReservedBits'),
+                            ('B', 'Request'),
                             ('H', 'Value'),
                             ('H', 'Index'),
                             ('H', 'Length'),
@@ -155,25 +178,37 @@ def SetupPacket():
                             ('s', 'DataInBuffer'),
                          ))
 def StatusPacket():
-   return cstruct.cStruct(( ('C', 'EnableFlags'),
-                            ('C', 'OneWireSpeed'),
-                            ('C', 'StrongPullUpDirection'),
-                            ('C', 'ProgPulseDuration'),
-                            ('C', 'PullDownSlewRate'),
-                            ('C', 'Write1LowTime'),
-                            ('C', 'DSOW0RecoveryTime'),
-                            ('C', 'Reserved1'),
-                            ('C', 'StatusFlags'),
-                            ('C', 'CurrentCommCmd1'),
-                            ('C', 'CurrentCommCmd2'),
-                            ('C', 'CommBufferStatus'),
-                            ('C', 'WriteBufferStatus'),
-                            ('C', 'ReadBufferStatus'),
-                            ('C', 'Reserved2'),
-                            ('C', 'Reserved3'),
-                            ('s', 'CommResultCodes'),
+   return cstruct.cStruct(( ('B', 'EnableFlags'),
+                            ('B', 'OneWireSpeed'),
+                            ('B', 'StrongPullUpDirection'),
+                            ('B', 'ProgPulseDuration'),
+                            ('B', 'PullDownSlewRate'),
+                            ('B', 'Write1LowTime'),
+                            ('B', 'DSOW0RecoveryTime'),
+                            ('B', 'Reserved1'),
+                            ('B', 'StatusFlags'),
+                            ('B', 'CurrentCommCmd1'),
+                            ('B', 'CurrentCommCmd2'),
+                            ('B', 'CommBufferStatus'),
+                            ('B', 'WriteBufferStatus'),
+                            ('B', 'ReadBufferStatus'),
+                            ('B', 'Reserved2'),
+                            ('B', 'Reserved3'),
+                            ('s', 'CommResultCodes', ''),
                          ))
 
+
+class iButton:
+   def __init__(self, longid):
+      self.longid = longid
+
+   def __str__(self):
+      keys = ['%02x' % ((self.longid >> (8*i)) & 0xff) for i in range(8)]
+      keys.reverse()
+      return ''.join(keys)
+
+   def __repr__(self):
+      return self.__str__()
 
 class DS2490:
    VENDORID    = 0x04fa
@@ -185,12 +220,21 @@ class DS2490:
 
       self.USBLevel = 0 # TODO - fix to proper init values (?)
       self.USBSpeed = 0
+      self._SerialNumber = 0L # XXX
       self.owAcquire()
+      self._ResetSearch()
 
    def _ResetSearch(self):
       self._LastDiscrep = 0
       self._LastDevice = 0
       self._LastFamilyDiscrep = 0
+
+   def GetIDs(self):
+      self._ResetSearch()
+      ret = []
+      while self.owNext():
+         ret.append(iButton(self._SerialNumber))
+      return ret
 
    def owAcquire(self):
       """
@@ -202,22 +246,30 @@ class DS2490:
          False - failure
       """
 
-      self.devfile= usb.OpenDevice(DS2490.VENDORID, DS2490.PRODUCTID, DS2490.INTERFACEID)
-      print 'setting alt interface...',
+      # XXX
+      self.devfile = usb.OpenDevice(DS2490.VENDORID, DS2490.PRODUCTID, DS2490.INTERFACEID)
+      #self.devfile.epin, self.devfile.epout = self.devfile.epout, self.devfile.epin
+      #self.devfile.addrin, self.devfile.addrout = self.devfile.addrout, self.devfile.addrin
+      self.DEBUG('opendevice.epin=0x%x'%self.devfile.epin.address())
+      self.DEBUG('opendevice.epout=0x%x'%self.devfile.epout.address())
+      self.DEBUG('setting alt interface...')
       ret = libusb.usb_set_altinterface(self.devfile.iface.device.handle, 3)
-      print 'done (ret=%i)' % ret
-      print 'cleaing endpoints'
+      self.DEBUG('done (ret=%i)' % ret)
+      self.DEBUG('cleaing endpoints')
       libusb.usb_clear_halt(self.devfile.iface.device.handle, DS2490_EP3)
       libusb.usb_clear_halt(self.devfile.iface.device.handle, DS2490_EP2)
       libusb.usb_clear_halt(self.devfile.iface.device.handle, DS2490_EP1)
       #self.devfile.resetep()
 
       # verify adapter is working
-      print 'adapter recover..'
+      self.DEBUG('adapter recover..')
       ret = self.AdapterRecover()
-      print 'done (ret=%i)' % ret
+      self.DEBUG('done (ret=%i)' % ret)
       return self.owTouchReset()
 
+   def DEBUG(self, s):
+      if 0:
+         print s
    def owLevel(self, new_level):
       """
       Set the 1-Wire net line level.
@@ -303,7 +355,7 @@ class DS2490:
       Source:
          libusbllnk.c
       """
-      print 'owTouchReset'
+      self.DEBUG('owTouchReset')
       # make sure strong pullup is not on
       if self.USBLevel == MODE_STRONG5:
          self.owLevel(MODE_NORMAL)
@@ -333,7 +385,8 @@ class DS2490:
             time.sleep(0.005)
 
          # success, check for shorts
-         if self.DS2490ShortCheck():
+         status, vpp = self.DS2490ShortCheck()
+         if status:
             self.USBVpp = vpp
             return True # 'present'
          else:
@@ -353,7 +406,7 @@ class DS2490:
       Source:
          libusbllnk.c
       """
-      print 'AdapterRecover'
+      self.DEBUG('AdapterRecover')
       if self.DS2490Detect():
          self.USBSpeed = MODE_NORMAL
          self.USBLevel = MODE_NORMAL
@@ -362,7 +415,7 @@ class DS2490:
          return False
 
    def DS2490Detect(self):
-      print 'DS2490Detect'
+      self.DEBUG('DS2490Detect')
       setup = SetupPacket()
 
       # reset the DS2490
@@ -433,7 +486,7 @@ class DS2490:
       Source:
          libusbds2490.c
       """
-      print 'DS2490Reset'
+      self.DEBUG( 'DS2490Reset')
       setup = SetupPacket()
 
       # setup for reset
@@ -458,14 +511,44 @@ class DS2490:
       return True
 
    def DS2490GetStatus(self):
-      print 'DS2490GetStatus'
+      self.DEBUG('DS2490GetStatus')
       buf = self.devfile.read(32, TIMEOUT_LIBUSB)
-      print 'got status: %s' % (repr(buf),)
+      #print 'got status: %s' % (repr(buf),)
       if len(buf) < 16:
          return None
       status = StatusPacket()
       status.unpack(buf) # TODO: make sure CommResultCodes (string) handling is correct
+      #print str(status)
       return status
+
+   def DS2490Write(self, buf):
+      # XXX 10/12 check endpoints
+      nbytes = self.devfile.write(buf)
+      return True
+
+   def DS2490Read(self, buf_len):
+      #return self.devfile.read(buf_len)
+      howmuch = buf_len
+      data=""
+      while howmuch > 0:
+         #print "usb_bulk_read(%s,%d,%d,%d)" % (self.devfile.iface.device.handle, DS2490_EP3, buf_len, TIMEOUT_LIBUSB)
+         res,outstr=libusb.usb_bulk_read_wrapped(self.devfile.iface.device.handle, DS2490_EP3, buf_len, TIMEOUT_LIBUSB)
+         #print "usb_bulk_read(%s,%d,%d,%d)=%d,%s" % (self.devfile.iface.device.handle, DS2490_EP3, buf_len, TIMEOUT_LIBUSB, res, `outstr`)
+         if res<0:
+             if len(data)>0:
+                 return data
+             e=USBException()
+             raise e
+         if res==0:
+             return data
+         data+=outstr
+         howmuch-=len(outstr)
+         if howmuch and len(outstr)!=buf_len:
+             # short read, no more data
+             break
+
+      return data
+
 
    def DS2490ShortCheck(self):
       """
@@ -479,7 +562,7 @@ class DS2490:
          False - Could not detect DS2490 or 1-Wire shorted
       """
       # get the result registers (if any)
-      print 'DS2490ShortCheck'
+      self.DEBUG('DS2490ShortCheck')
       status = self.DS2490GetStatus()
       if status is None:
          return False
@@ -489,14 +572,14 @@ class DS2490:
 
       # check for short
       if status.CommBufferStatus != 0:
-         return False
+         return (False, 0)
       else:
          # check for short
          for i in range(len(status.CommResultCodes)):
             # check for SH bit (0x02), ignore 0xA5
             if status.CommResultCodes[i] & COMMCMDERRORRESULT_SH:
                # short detected
-               return False
+               return (False, 0)
 
       present = True
 
@@ -509,7 +592,7 @@ class DS2490:
             if status.CommResultCodes[i] & COMMCMDERRORRESULT_NRS:
                # empty bus detected
                present = False
-      return True
+      return (True, vpp)
 
    # owFirst, from libusbnet.c
    def owFirst(self, alarm_only = False):
@@ -529,9 +612,9 @@ class DS2490:
          None - There are no devices on the 1-Wire Net
       """
       self._ResetSearch()
-      return self.owNext()
+      return self.owNext(alarm_only)
 
-   def owNext(self):
+   def owNext(self, alarm_only=False, do_reset=True):
       """
       The owNext function does a general search.
 
@@ -551,32 +634,45 @@ class DS2490:
          False - no new device was found. Either the last search was the last
          device or there are no devices on the 1-Wire Net
       """
+      self.DEBUG('owNext')
 
       if self._LastDevice:
+         self.DEBUG('Last Device!')
          self._ResetSearch()
          return False
 
-      if self._LastDiscrep != 0xFF:
-         pass # XXX stop here
+      search_cmd = (0xF0, 0xEC)[alarm_only == 1]
 
-      search_command = (0xF0, 0xEC)[alarm_only == 1]
-
-      # if do_reset - not impl. in python (yet?)
+      # check if reset is first requested
+      if do_reset:
+         # extra reset if last part was a ds1994/ds2404 (due to alarm)
+         if self._SerialNumber & 0x7f == 0x04:
+            self.owTouchReset()
+         # if there are no parts on the 1-wire, return false
+         if not self.owTouchReset():
+            self._ResetSearch()
+            return False
 
       # build the rom number to pass to the USB chip
+      rom_buf = self._SerialNumber
 
       # take into account LastDiscrep
       if self._LastDiscrep != 0xFF:
          if self._LastDiscrep > 0:
             # bitacc stuff here - TODO
-            pass
+            rom_buf |= (1 << (self._LastDiscrep - 1))
+         for i in range(self._LastDiscrep, 64):
+            rom_buf &= ~(1 << i) # TODO - single OR much more efficient here, silly dallas
 
       # put the ROM ID in EP2
-      if not self.DS2490Write(rom_buf):
+      self.DEBUG('_'*20 + 'rombuf:' + mkserial(rom_buf))
+      rom_buf = struct.pack('Q', rom_buf) ## XXX endianness
+      if not self.DS2490Write(rom_buf): # XXX libusb doesnt return len
          self.AdapterRecover()
          return False
 
       # setup for search command call
+      setup = SetupPacket()
       setup.RequestTypeReservedBits = 0x40
       setup.Request = COMM_CMD
       setup.Value = COMM_SEARCH_ACCESS | COMM_IM | COMM_SM | COMM_F | COMM_RTS
@@ -599,12 +695,16 @@ class DS2490:
          return False
 
       # set a time limit
-      limit = time.time() + .200
+      limit = time.time() + 0.200
 
-      def loop_body():
+
+      # do...while{}
+      do_while = 0
+      while not do_while or (status.StatusFlags & STATUSFLAGS_IDLE == 0 and time.time() < limit):
+         do_while = 1
          status = self.DS2490GetStatus()
-         if not status:
-            return 0 # ie, break
+         if status is None:
+            break
          else:
             # look for any fail conditions
             for i in range(len(status.CommResultCodes)):
@@ -612,42 +712,47 @@ class DS2490:
                # ONEWIREDEVICEDETECT
                if status.CommResultCodes[i] != ONEWIREDEVICEDETECT:
                   # failure
-                  return 0 # ie break
-         return status
-
-      # do...while{}
-      status = loop_body()
-      while status != 0 and (status.StatusFlags & STATUSFLAGS_IDLE) == 0 and time.time() < limit:
-         status = loop_body()
+                  print '*'*20, 'failure in owNext!'
+                  break
 
       # check the results of the wait for idle
-      if status.StatusFlags & STATUSFLAGS_IDLE == 0:
+      if status is None or status.StatusFlags & STATUSFLAGS_IDLE == 0:
+         print '*'*20, 'owNext search failed!'
          self.AdapterRecover()
          return False
 
       # check for data
       if status.ReadBufferStatus > 0:
+         self.DEBUG('_'*20 + 'buffer status looks good!')
          # read the load
          buf_len = 16
-         if not self.DS2490Read():
+         ret_buf = self.DS2490Read(buf_len)
+         if not ret_buf:
+            print '*'*20, 'buffer empty, wtf!!'
             self.AdapterRecover()
             return False
 
+         self.DEBUG('___________ ret buf: %s' % repr(ret_buf))
          # success, get rom and discrepancy
-         self._LastDevice = (buf_len == 8)
+         self._LastDevice = (len(ret_buf) == 8)
 
          # extract the ROM and check crc
-         self.setcrc8(0)
-         for i in range(8):
-            self.SerialNum[i] = ret_buf[i]
+         #self.setcrc8(0)
+         self._SerialNumber = struct.unpack('Q', ret_buf[:8])[0]
+         other_number = 0L
+         if len(ret_buf) > 8:
+            other_number = struct.unpack('Q', ret_buf[8:])[0]
+
+      lastcrc8 = None
 
       # crc OK and family code is not 8
-      if not lastcrc8 and self.SerialNum[0] != 0:
+      if not lastcrc8 and self._SerialNumber & 0xff != 0:
          # loop through the discrepancy to get the pointers
          for i in range(64):
             # if discrepancy
-            if self.testbit(i, ret_buf[8]) and not self.testbit(i, ret_buf[0]):
+            if ((other_number >> i) & 0x1) != 0 and ((self._SerialNumber >> i) & 0x1) == 0:
                self._LastDiscrep = i + 1
+         ResetSearch = False
          rt = True
       else:
          ResetSearch = True
@@ -657,18 +762,26 @@ class DS2490:
       if ResetSearch:
          self._LastDiscrep = 0xFF
          self._LastDevice = False
-         self.SerialNum = 0 # TODO define this field
+         self._SerialNumber = 0L # TODO define this field
 
       return rt
 
 
+def mkserial(num):
+   return ' '.join(['%02x' % ((num >> (8*i)) & 0xff) for i in range(8)])
 
 
 if __name__ == '__main__':
    print 'getting new devices...'
    usb.UpdateLists()
    dev = DS2490()
-   print 'dev acquited, now trying to get status...'
    dev.DS2490GetStatus()
    dev.devfile.close()
+   print ''
+   oldlen = 0
+   while 1:
+      ids = dev.GetIDs()
+      print ids
+      x = raw_input('')
+
 
