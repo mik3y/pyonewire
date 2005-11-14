@@ -203,9 +203,7 @@ class iButton:
       self.longid = longid
 
    def __str__(self):
-      keys = ['%02x' % ((self.longid >> (8*i)) & 0xff) for i in range(8)]
-      keys.reverse()
-      return ''.join(keys)
+      return ''.join(['%02x' % ((self.longid >> (8*i)) & 0xff) for i in reversed(range(8))])
 
    def __repr__(self):
       return self.__str__()
@@ -415,7 +413,6 @@ class DS2490:
          return False
 
    def DS2490Detect(self):
-      self.DEBUG('DS2490Detect')
       setup = SetupPacket()
 
       # reset the DS2490
@@ -511,7 +508,6 @@ class DS2490:
       return True
 
    def DS2490GetStatus(self):
-      self.DEBUG('DS2490GetStatus')
       buf = self.devfile.read(32, TIMEOUT_LIBUSB)
       #print 'got status: %s' % (repr(buf),)
       if len(buf) < 16:
@@ -562,7 +558,6 @@ class DS2490:
          False - Could not detect DS2490 or 1-Wire shorted
       """
       # get the result registers (if any)
-      self.DEBUG('DS2490ShortCheck')
       status = self.DS2490GetStatus()
       if status is None:
          return False
@@ -577,8 +572,9 @@ class DS2490:
          # check for short
          for i in range(len(status.CommResultCodes)):
             # check for SH bit (0x02), ignore 0xA5
-            if status.CommResultCodes[i] & COMMCMDERRORRESULT_SH:
+            if ord(status.CommResultCodes[i]) & COMMCMDERRORRESULT_SH:
                # short detected
+               #print '!!! short detected'
                return (False, 0)
 
       present = True
@@ -589,7 +585,8 @@ class DS2490:
          # DEVICEDETECT
          if status.CommResultCodes[i] != ONEWIREDEVICEDETECT:
             # check for NRS bit
-            if status.CommResultCodes[i] & COMMCMDERRORRESULT_NRS:
+            if ord(status.CommResultCodes[i]) & COMMCMDERRORRESULT_NRS:
+               #print '!!! empty bus detected'
                # empty bus detected
                present = False
       return (True, vpp)
@@ -635,6 +632,8 @@ class DS2490:
          device or there are no devices on the 1-Wire Net
       """
       self.DEBUG('owNext')
+      ResetSearch = False
+      rt = False
 
       if self._LastDevice:
          self.DEBUG('Last Device!')
@@ -697,7 +696,6 @@ class DS2490:
       # set a time limit
       limit = time.time() + 0.200
 
-
       # do...while{}
       do_while = 0
       while not do_while or (status.StatusFlags & STATUSFLAGS_IDLE == 0 and time.time() < limit):
@@ -712,12 +710,12 @@ class DS2490:
                # ONEWIREDEVICEDETECT
                if status.CommResultCodes[i] != ONEWIREDEVICEDETECT:
                   # failure
-                  print '*'*20, 'failure in owNext!'
+                  #print '*'*20, 'failure in owNext!'
                   break
 
       # check the results of the wait for idle
       if status is None or status.StatusFlags & STATUSFLAGS_IDLE == 0:
-         print '*'*20, 'owNext search failed!'
+         #print '*'*20, 'owNext search failed!'
          self.AdapterRecover()
          return False
 
@@ -728,7 +726,7 @@ class DS2490:
          buf_len = 16
          ret_buf = self.DS2490Read(buf_len)
          if not ret_buf:
-            print '*'*20, 'buffer empty, wtf!!'
+            #print '*'*20, 'buffer empty, wtf!!'
             self.AdapterRecover()
             return False
 
@@ -743,17 +741,17 @@ class DS2490:
          if len(ret_buf) > 8:
             other_number = struct.unpack('Q', ret_buf[8:])[0]
 
-      lastcrc8 = None
+         lastcrc8 = None
 
-      # crc OK and family code is not 8
-      if not lastcrc8 and self._SerialNumber & 0xff != 0:
-         # loop through the discrepancy to get the pointers
-         for i in range(64):
-            # if discrepancy
-            if ((other_number >> i) & 0x1) != 0 and ((self._SerialNumber >> i) & 0x1) == 0:
-               self._LastDiscrep = i + 1
-         ResetSearch = False
-         rt = True
+         # crc OK and family code is not 8
+         if not lastcrc8 and self._SerialNumber & 0xff != 0:
+            # loop through the discrepancy to get the pointers
+            for i in range(64):
+               # if discrepancy
+               if ((other_number >> i) & 0x1) != 0 and ((self._SerialNumber >> i) & 0x1) == 0:
+                  self._LastDiscrep = i + 1
+            rt = True
+
       else:
          ResetSearch = True
          rt = False
@@ -780,8 +778,10 @@ if __name__ == '__main__':
    print ''
    oldlen = 0
    while 1:
+      time.sleep(0.1)
       ids = dev.GetIDs()
-      print ids
-      x = raw_input('')
+      if oldlen != len(ids):
+         print ids
+         oldlen = len(ids)
 
 
