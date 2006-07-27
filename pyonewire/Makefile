@@ -1,6 +1,6 @@
-PYINC = /usr/include/python2.2
-PYLIB = /usr/lib/python2.2/config/libpython2.2.a 
-PYSITEPACKAGES = /usr/lib/python2.2/site-packages
+PYINC = /usr/include/python2.3
+PYLIB = /usr/lib/python2.3/config/libpython2.3.a 
+PYSITEPACKAGES = /usr/lib/python2.3/site-packages
 
 
 
@@ -21,10 +21,10 @@ onewire_wrap.c: onewire.i
 	swig -python onewire.i
 
 _onewiremodule.so: onewire_wrap.c $(FILEOBJS) $(MISCOBJS)
-	gcc -g -shared -I$(PYINC) $(FILEOBJS) $(MISCOBJS) $(PYLIB) onewire_wrap.c -o _onewiremodule.so
+	gcc -g -fPIC -shared -I$(PYINC) $(FILEOBJS) $(MISCOBJS) $(PYLIB) onewire_wrap.c -o _onewiremodule.so
 
 %.o: %.c
-	$(CC) -g -c -Iinclude $< -o $*.o
+	$(CC) -g -fPIC -c -Iinclude $< -o $*.o
 
 clean:
 	rm -f dallas/*.o *.o *.so *.pyc

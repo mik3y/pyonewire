@@ -12,6 +12,7 @@ In this first pass of rewrite, little attempt has been made to refactor or
 clarify the original Dallas code (which is mostly well written anyway.)
 """
 
+import logging
 import struct
 import sys
 import time
@@ -215,6 +216,7 @@ class DS2490:
 
    def __init__(self):
       self.devfile = None
+      self.logger = logging.getLogger('ds2490')
 
       self.USBLevel = 0 # TODO - fix to proper init values (?)
       self.USBSpeed = 0
@@ -248,32 +250,29 @@ class DS2490:
       self.devfile = usb.OpenDevice(DS2490.VENDORID, DS2490.PRODUCTID, DS2490.INTERFACEID)
       #self.devfile.epin, self.devfile.epout = self.devfile.epout, self.devfile.epin
       #self.devfile.addrin, self.devfile.addrout = self.devfile.addrout, self.devfile.addrin
-      self.DEBUG('opendevice.epin=0x%x'%self.devfile.epin.address())
-      self.DEBUG('opendevice.epout=0x%x'%self.devfile.epout.address())
-      self.DEBUG('setting alt interface...')
+      self.logger.debug('opendevice.epin=0x%x'%self.devfile.epin.address())
+      self.logger.debug('opendevice.epout=0x%x'%self.devfile.epout.address())
+      self.logger.debug('setting alt interface...')
       ret = libusb.usb_set_altinterface(self.devfile.iface.device.handle, 3)
-      self.DEBUG('done (ret=%i)' % ret)
-      self.DEBUG('cleaing endpoints')
+      self.logger.debug('done (ret=%i)' % ret)
+      self.logger.debug('cleaing endpoints')
       libusb.usb_clear_halt(self.devfile.iface.device.handle, DS2490_EP3)
       libusb.usb_clear_halt(self.devfile.iface.device.handle, DS2490_EP2)
       libusb.usb_clear_halt(self.devfile.iface.device.handle, DS2490_EP1)
       #self.devfile.resetep()
 
       # verify adapter is working
-      self.DEBUG('adapter recover..')
+      self.logger.debug('adapter recover..')
       ret = self.AdapterRecover()
-      self.DEBUG('done (ret=%i)' % ret)
+      self.logger.debug('done (ret=%i)' % ret)
       return self.owTouchReset()
 
-   def DEBUG(self, s):
-      if 0:
-         print s
    def owLevel(self, new_level):
       """
       Set the 1-Wire net line level.
 
       The values for new_level are as follows:
-      
+
       Input:
          new_level - new level defined as
             MODE_NORMAL    0x00
@@ -353,7 +352,7 @@ class DS2490:
       Source:
          libusbllnk.c
       """
-      self.DEBUG('owTouchReset')
+      self.logger.debug('owTouchReset')
       # make sure strong pullup is not on
       if self.USBLevel == MODE_STRONG5:
          self.owLevel(MODE_NORMAL)
@@ -404,7 +403,7 @@ class DS2490:
       Source:
          libusbllnk.c
       """
-      self.DEBUG('AdapterRecover')
+      self.logger.debug('AdapterRecover')
       if self.DS2490Detect():
          self.USBSpeed = MODE_NORMAL
          self.USBLevel = MODE_NORMAL
@@ -483,7 +482,7 @@ class DS2490:
       Source:
          libusbds2490.c
       """
-      self.DEBUG( 'DS2490Reset')
+      self.logger.debug( 'DS2490Reset')
       setup = SetupPacket()
 
       # setup for reset
@@ -631,12 +630,12 @@ class DS2490:
          False - no new device was found. Either the last search was the last
          device or there are no devices on the 1-Wire Net
       """
-      self.DEBUG('owNext')
+      self.logger.debug('owNext')
       ResetSearch = False
       rt = False
 
       if self._LastDevice:
-         self.DEBUG('Last Device!')
+         self.logger.debug('Last Device!')
          self._ResetSearch()
          return False
 
@@ -664,7 +663,7 @@ class DS2490:
             rom_buf &= ~(1 << i) # TODO - single OR much more efficient here, silly dallas
 
       # put the ROM ID in EP2
-      self.DEBUG('_'*20 + 'rombuf:' + mkserial(rom_buf))
+      self.logger.debug('_'*20 + 'rombuf:' + mkserial(rom_buf))
       rom_buf = struct.pack('Q', rom_buf) ## XXX endianness
       if not self.DS2490Write(rom_buf): # XXX libusb doesnt return len
          self.AdapterRecover()
@@ -721,7 +720,7 @@ class DS2490:
 
       # check for data
       if status.ReadBufferStatus > 0:
-         self.DEBUG('_'*20 + 'buffer status looks good!')
+         self.logger.debug('_'*20 + 'buffer status looks good!')
          # read the load
          buf_len = 16
          ret_buf = self.DS2490Read(buf_len)
@@ -730,7 +729,7 @@ class DS2490:
             self.AdapterRecover()
             return False
 
-         self.DEBUG('___________ ret buf: %s' % repr(ret_buf))
+         self.logger.debug('___________ ret buf: %s' % repr(ret_buf))
          # success, get rom and discrepancy
          self._LastDevice = (len(ret_buf) == 8)
 
