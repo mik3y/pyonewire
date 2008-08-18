@@ -19,7 +19,7 @@ import time
 
 import cstruct
 import usb
-import libusb
+import usb
 
 ### defines - from libusbds2490.c
 
@@ -209,6 +209,15 @@ class iButton:
    def __repr__(self):
       return self.__str__()
 
+def GetDevice(vendor_id, product_id):
+  buses = usb.busses()
+  for bus in buses:
+    for device in bus.devices:
+      if (device.idVendor, device.idProduct) == (vendor_id, product_id):
+        return device
+  return None
+
+logging.basicConfig(level=logging.DEBUG)
 class DS2490:
    VENDORID    = 0x04fa
    PRODUCTID   = 0x2490
@@ -216,7 +225,8 @@ class DS2490:
 
    def __init__(self):
       self.devfile = None
-      self.logger = logging.getLogger('ds2490')
+      self.logger = logging.getLogger("ds2490")
+      self.logger.setLevel(logging.DEBUG)
 
       self.USBLevel = 0 # TODO - fix to proper init values (?)
       self.USBSpeed = 0
@@ -246,24 +256,29 @@ class DS2490:
          False - failure
       """
 
-      # XXX
-      self.devfile = usb.OpenDevice(DS2490.VENDORID, DS2490.PRODUCTID, DS2490.INTERFACEID)
-      #self.devfile.epin, self.devfile.epout = self.devfile.epout, self.devfile.epin
-      #self.devfile.addrin, self.devfile.addrout = self.devfile.addrout, self.devfile.addrin
-      self.logger.debug('opendevice.epin=0x%x'%self.devfile.epin.address())
-      self.logger.debug('opendevice.epout=0x%x'%self.devfile.epout.address())
-      self.logger.debug('setting alt interface...')
-      ret = libusb.usb_set_altinterface(self.devfile.iface.device.handle, 3)
-      self.logger.debug('done (ret=%i)' % ret)
+      self._device = GetDevice(DS2490.VENDORID, DS2490.PRODUCTID)
+      if not self._device:
+        return False
+      self.logger.debug('got device: %s' % self._device)
+
+      self._handle = self._device.open()
+
+      self._handle.reset()
+
+      self._handle.claimInterface(DS2490.INTERFACEID)
+      self.logger.debug('claimed interface')
+
+      self._handle.setAltInterface(3)
+      self.logger.debug('set alt interface')
+
       self.logger.debug('cleaing endpoints')
-      libusb.usb_clear_halt(self.devfile.iface.device.handle, DS2490_EP3)
-      libusb.usb_clear_halt(self.devfile.iface.device.handle, DS2490_EP2)
-      libusb.usb_clear_halt(self.devfile.iface.device.handle, DS2490_EP1)
-      #self.devfile.resetep()
+      for ep in (DS2490_EP3, DS2490_EP2, DS2490_EP1):
+        self._handle.clearHalt(ep)
 
       # verify adapter is working
       self.logger.debug('adapter recover..')
       ret = self.AdapterRecover()
+
       self.logger.debug('done (ret=%i)' % ret)
       return self.owTouchReset()
 
@@ -295,16 +310,9 @@ class DS2490:
          setup.Request = MODE_CMD
          setup.Value = MOD_PULSE_EN
          setup.Index = ENABLEPULSE_SPUE
-         setup.Length = 0x00
-         setup.DataOut = False
          # call the libusb driver
-         ret = libusb.usb_control_msg( self.devfile.iface.device.handle,
-                                       setup.RequestTypeReservedBits,
-                                       setup.Request,
-                                       setup.Value,
-                                       setup.Index,
-                                       '',
-                                       TIMEOUT_LIBUSB)
+         ret = self.DoControlMessage(setup)
+
          if ret < 0:
             # failure
             self.AdapterRecover()
@@ -315,16 +323,9 @@ class DS2490:
          setup.Request = COMM_CMD
          setup.Value = COMM_PULSE | COMM_IM
          setup.Index = 0
-         setup.Length = 0
-         setup.DataOut = False
-         # call the libusb driver
-         ret = libusb.usb_control_msg( self.devfile.iface.device.handle,
-                                       setup.RequestTypeReservedBits,
-                                       setup.Request,
-                                       setup.Value,
-                                       setup.Index,
-                                       '',
-                                       TIMEOUT_LIBUSB)
+
+         ret = self.DoControlMessage(setup)
+
          if ret < 0:
             # failure
             self.AdapterRecover()
@@ -363,15 +364,8 @@ class DS2490:
       setup.Request = COMM_CMD
       setup.Value = COMM_1_WIRE_RESET | COMM_F | COMM_IM | COMM_SE
       setup.Index = ONEWIREBUSSPEED_FLEXIBLE #XXX OVERDRIVE
-      setup.Length = 0
-      setup.DataOut = False
-      ret = libusb.usb_control_msg( self.devfile.iface.device.handle,
-                                    setup.RequestTypeReservedBits,
-                                    setup.Request,
-                                    setup.Value,
-                                    setup.Index,
-                                    '',
-                                    TIMEOUT_LIBUSB)
+      ret = self.DoControlMessage(setup)
+
       if ret < 0:
          # failure
          self.AdapterRecover()
@@ -411,62 +405,42 @@ class DS2490:
       else:
          return False
 
+   def DoControlMessage(self, setup):
+      return self._handle.controlMsg(setup.RequestTypeReservedBits,
+                                     setup.Request, setup.Value, setup.Index,
+                                     timeout=TIMEOUT_LIBUSB)
+
    def DS2490Detect(self):
       setup = SetupPacket()
 
       # reset the DS2490
       self.DS2490Reset()
 
+      self.logger.debug('DS2490Detect')
+
       # set the stron pullup duration to infinite
       setup.RequestTypeReservedBits = 0x40
       setup.Request = COMM_CMD
       setup.Value = COMM_SET_DURATION | COMM_IM
-      setup.Index = 0x0000
-      setup.Length = 0
-      setup.DataOut = False
+      setup.Index = 0
 
-      # call the libusb driver
-      ret = libusb.usb_control_msg( self.devfile.iface.device.handle,
-                                    setup.RequestTypeReservedBits,
-                                    setup.Request,
-                                    setup.Value,
-                                    setup.Index,
-                                    '',
-                                    TIMEOUT_LIBUSB)
+      ret = self.DoControlMessage(setup)
 
       # set the 12V pullup duration to 512us
       setup.RequestTypeReservedBits = 0x40
       setup.Request = COMM_CMD
       setup.Value = COMM_SET_DURATION | COMM_IM | COMM_TYPE
-      setup.Index = 0x0040
-      setup.Length = 0
-      setup.DataOut = False
+      setup.Index = 0x40
 
-      # call the libusb driver
-      ret = libusb.usb_control_msg( self.devfile.iface.device.handle,
-                                    setup.RequestTypeReservedBits,
-                                    setup.Request,
-                                    setup.Value,
-                                    setup.Index,
-                                    '',
-                                    TIMEOUT_LIBUSB)
+      ret = self.DoControlMessage(setup)
 
       # disable strong pullup, but leave progrm pulse enabled (faster)
       setup.RequestTypeReservedBits = 0x40
       setup.Request = MODE_CMD
       setup.Value = MOD_PULSE_EN
       setup.Index = ENABLEPULSE_PRGE
-      setup.Length = 0x00
-      setup.DataOut = False
 
-      # call the libusb driver
-      ret = libusb.usb_control_msg( self.devfile.iface.device.handle,
-                                    setup.RequestTypeReservedBits,
-                                    setup.Request,
-                                    setup.Value,
-                                    setup.Index,
-                                    '',
-                                    TIMEOUT_LIBUSB)
+      ret = self.DoControlMessage(setup)
 
       # return result of short check (XXX - return value correct?)
       return self.DS2490ShortCheck()
@@ -490,24 +464,15 @@ class DS2490:
       setup.Request = CONTROL_CMD
       setup.Value = CTL_RESET_DEVICE
       setup.Index = 0x00
-      setup.Length = 0x0
-      setup.DataOut = False
 
-      # call the libusb driver
-      ret = libusb.usb_control_msg( self.devfile.iface.device.handle,
-                                    setup.RequestTypeReservedBits,
-                                    setup.Request,
-                                    setup.Value,
-                                    setup.Index,
-                                    '',
-                                    TIMEOUT_LIBUSB)
+      ret = self.DoControlMessage(setup)
 
       if ret < 0 :
          return False
       return True
 
    def DS2490GetStatus(self):
-      buf = self.devfile.read(32, TIMEOUT_LIBUSB)
+      buf = self._handle.interruptRead(32, TIMEOUT_LIBUSB)
       #print 'got status: %s' % (repr(buf),)
       if len(buf) < 16:
          return None
@@ -676,16 +641,8 @@ class DS2490:
       setup.Value = COMM_SEARCH_ACCESS | COMM_IM | COMM_SM | COMM_F | COMM_RTS
       # the number of devices to read (1) with the search command
       setup.Index = 0x0100 | (search_cmd & 0x00ff)
-      setup.Length = 0
-      setup.DataOut = False
-      # call the libusb driver
-      ret = libusb.usb_control_msg( self.devfile.iface.device.handle,
-                                    setup.RequestTypeReservedBits,
-                                    setup.Request,
-                                    setup.Value,
-                                    setup.Index,
-                                    '',
-                                    TIMEOUT_LIBUSB)
+
+      ret = self.DoControlMessage(setup)
 
       if ret < 0:
          # failure
@@ -769,18 +726,4 @@ def mkserial(num):
 
 
 if __name__ == '__main__':
-   print 'getting new devices...'
-   usb.UpdateLists()
    dev = DS2490()
-   dev.DS2490GetStatus()
-   dev.devfile.close()
-   print ''
-   oldlen = 0
-   while 1:
-      time.sleep(0.1)
-      ids = dev.GetIDs()
-      if oldlen != len(ids):
-         print ids
-         oldlen = len(ids)
-
-
