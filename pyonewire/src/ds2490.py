@@ -271,7 +271,7 @@ class DS2490:
       self._handle.setAltInterface(3)
       self.logger.debug('set alt interface')
 
-      self.logger.debug('cleaing endpoints')
+      self.logger.debug('clearing endpoints')
       for ep in (DS2490_EP3, DS2490_EP2, DS2490_EP1):
         self._handle.clearHalt(ep)
 
@@ -424,7 +424,7 @@ class DS2490:
       setup.Value = COMM_SET_DURATION | COMM_IM
       setup.Index = 0
 
-      ret = self.DoControlMessage(setup)
+      #ret = self.DoControlMessage(setup)
 
       # set the 12V pullup duration to 512us
       setup.RequestTypeReservedBits = 0x40
@@ -432,7 +432,7 @@ class DS2490:
       setup.Value = COMM_SET_DURATION | COMM_IM | COMM_TYPE
       setup.Index = 0x40
 
-      ret = self.DoControlMessage(setup)
+      #ret = self.DoControlMessage(setup)
 
       # disable strong pullup, but leave progrm pulse enabled (faster)
       setup.RequestTypeReservedBits = 0x40
@@ -440,7 +440,7 @@ class DS2490:
       setup.Value = MOD_PULSE_EN
       setup.Index = ENABLEPULSE_PRGE
 
-      ret = self.DoControlMessage(setup)
+      #ret = self.DoControlMessage(setup)
 
       # return result of short check (XXX - return value correct?)
       return self.DS2490ShortCheck()
@@ -472,12 +472,13 @@ class DS2490:
       return True
 
    def DS2490GetStatus(self):
-      buf = self._handle.interruptRead(32, TIMEOUT_LIBUSB)
-      #print 'got status: %s' % (repr(buf),)
+      buf = self._handle.bulkRead(1, 32, TIMEOUT_LIBUSB)
+      print 'got status: %s' % (repr(buf),)
       if len(buf) < 16:
          return None
       status = StatusPacket()
-      status.unpack(buf) # TODO: make sure CommResultCodes (string) handling is correct
+      b2 = struct.pack('16B', *buf)
+      status.unpack(b2) # TODO: make sure CommResultCodes (string) handling is correct
       #print str(status)
       return status
 
