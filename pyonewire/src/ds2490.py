@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 """
 Python interface to DS2490 USB device, (c) 2005 mike wakerly
 Derived from libusblinux300 package, (c) 2004 Dallas Semiconductor Corporation
@@ -51,6 +52,10 @@ CTL_FLUSH_COMM_CMDS = 0x0007
 CTL_FLUSH_RCV_BUFFER = 0x0008
 CTL_FLUSH_XMT_BUFFER = 0x0009
 CTL_GET_COMM_CMDS = 0x000A
+
+EP_STATUS = 1
+EP_DATA_OUT = 2
+EP_DATA_IN = 3
 
 # Value field COMM Command options
 
@@ -166,8 +171,18 @@ COMMCMDERRORRESULT_CRC =          0x20  # if set a CRC occurred for one of the c
 COMMCMDERRORRESULT_RDP =          0x40  # if set READ REDIRECT PAGE WITH CRC encountered a redirected page
 COMMCMDERRORRESULT_EOS =          0x80  # if set SEARCH ACCESS with SM=1 ended sooner than expected with too few ROM IDs
 
-
-
+TRACE_LEVEL = 0
+def trace(fn):
+  def wrapped(*args, **kwargs):
+    global TRACE_LEVEL
+    pad = '  ' * TRACE_LEVEL
+    TRACE_LEVEL += 1
+    print '%s> %s' % (pad, fn.__name__)
+    ret = fn(*args, **kwargs)
+    print '%s< %s' % (pad, fn.__name__)
+    TRACE_LEVEL -= 1
+    return ret
+  return wrapped
 
 def SetupPacket():
    return cstruct.cStruct(( ('B', 'RequestTypeReservedBits'),
@@ -224,7 +239,6 @@ class DS2490:
    INTERFACEID = 0x0
 
    def __init__(self):
-      self.devfile = None
       self.logger = logging.getLogger("ds2490")
       self.logger.setLevel(logging.DEBUG)
 
@@ -239,6 +253,7 @@ class DS2490:
       self._LastDevice = 0
       self._LastFamilyDiscrep = 0
 
+   @trace
    def GetIDs(self):
       self._ResetSearch()
       ret = []
@@ -246,6 +261,7 @@ class DS2490:
          ret.append(iButton(self._SerialNumber))
       return ret
 
+   @trace
    def owAcquire(self):
       """
       Attempt to acquire a 1-wire net using a USB port and a DS2490 based
@@ -276,12 +292,12 @@ class DS2490:
         self._handle.clearHalt(ep)
 
       # verify adapter is working
-      self.logger.debug('adapter recover..')
-      ret = self.AdapterRecover()
+      self.AdapterRecover()
 
-      self.logger.debug('done (ret=%i)' % ret)
+      self.logger.debug('done')
       return self.owTouchReset()
 
+   @trace
    def owLevel(self, new_level):
       """
       Set the 1-Wire net line level.
@@ -306,12 +322,7 @@ class DS2490:
       elif new_level == MODE_STRONG5 and self.USBLevel == MODE_NORMAL: # turn on infinite strong5 pullup?
          # assume duration set to infinite during setup of device
          # enable the pulse
-         setup.RequestTypeReservedBits = 0x40
-         setup.Request = MODE_CMD
-         setup.Value = MOD_PULSE_EN
-         setup.Index = ENABLEPULSE_SPUE
-         # call the libusb driver
-         ret = self.DoControlMessage(setup)
+         ret = self.SendControlMode(MOD_PULSE_EN, ENABLEPULSE_SPUE)
 
          if ret < 0:
             # failure
@@ -319,12 +330,7 @@ class DS2490:
             return self.USBLevel
 
          # start the pulse
-         setup.RequestTypeReservedBits = 0x40
-         setup.Request = COMM_CMD
-         setup.Value = COMM_PULSE | COMM_IM
-         setup.Index = 0
-
-         ret = self.DoControlMessage(setup)
+         ret = self.SendControl((COMM_PULSE | COMM_IM), 0)
 
          if ret < 0:
             # failure
@@ -342,6 +348,7 @@ class DS2490:
       # XXX - is this path even valid, or just for completeness, in dallas source..?
       return self.USBLevel
 
+   @trace
    def owTouchReset(self):
       """
       Reset all of the devices on the 1-Wire net and return the result.
@@ -353,18 +360,14 @@ class DS2490:
       Source:
          libusbllnk.c
       """
-      self.logger.debug('owTouchReset')
       # make sure strong pullup is not on
       if self.USBLevel == MODE_STRONG5:
          self.owLevel(MODE_NORMAL)
 
       # construct command
-      setup = SetupPacket()
-      setup.RequestTypeReservedBits = 0x40
-      setup.Request = COMM_CMD
-      setup.Value = COMM_1_WIRE_RESET | COMM_F | COMM_IM | COMM_SE
-      setup.Index = ONEWIREBUSSPEED_FLEXIBLE #XXX OVERDRIVE
-      ret = self.DoControlMessage(setup)
+      val = COMM_1_WIRE_RESET | COMM_F | COMM_IM | COMM_SE
+      idx = ONEWIREBUSSPEED_FLEXIBLE #XXX OVERDRIVE
+      ret = self.SendControl(val, idx)
 
       if ret < 0:
          # failure
@@ -386,6 +389,7 @@ class DS2490:
             self.AdapterRecover()
             return False
 
+   @trace
    def AdapterRecover(self):
       """
       Attempt to recover communication with the DS2490
@@ -397,7 +401,6 @@ class DS2490:
       Source:
          libusbllnk.c
       """
-      self.logger.debug('AdapterRecover')
       if self.DS2490Detect():
          self.USBSpeed = MODE_NORMAL
          self.USBLevel = MODE_NORMAL
@@ -405,46 +408,45 @@ class DS2490:
       else:
          return False
 
-   def DoControlMessage(self, setup):
-      return self._handle.controlMsg(setup.RequestTypeReservedBits,
-                                     setup.Request, setup.Value, setup.Index,
-                                     timeout=TIMEOUT_LIBUSB)
+   def _SendMessage(self, msg, timeout=TIMEOUT_LIBUSB):
+      print '--- SendMessage %x %x' % (msg.Value, msg.Index)
+      return self._handle.controlMsg(msg.RequestTypeReservedBits,
+                                     msg.Request, msg.Value, msg.Index,
+                                     timeout=timeout)
 
+   @trace
+   def SendControlCommand(self, value, index, timeout=TIMEOUT_LIBUSB):
+      msg = SetupPacket()
+      msg.Value = value
+      msg.Index = index
+      msg.Request = CONTROL_CMD
+      return self._SendMessage(msg, timeout)
+
+   @trace
+   def SendControl(self, value, index, timeout=TIMEOUT_LIBUSB):
+      msg = SetupPacket()
+      msg.Value = value
+      msg.Index = index
+      msg.Request = COMM_CMD
+      return self._SendMessage(msg, timeout)
+
+   @trace
+   def SendControlMode(self, value, index, timeout=TIMEOUT_LIBUSB):
+      msg = SetupPacket()
+      msg.Value = value
+      msg.Index = index
+      msg.Request = MODE_CMD
+      return self._SendMessage(msg, timeout)
+
+   @trace
    def DS2490Detect(self):
-      setup = SetupPacket()
-
       # reset the DS2490
       self.DS2490Reset()
-
-      self.logger.debug('DS2490Detect')
-
-      # set the stron pullup duration to infinite
-      setup.RequestTypeReservedBits = 0x40
-      setup.Request = COMM_CMD
-      setup.Value = COMM_SET_DURATION | COMM_IM
-      setup.Index = 0
-
-      #ret = self.DoControlMessage(setup)
-
-      # set the 12V pullup duration to 512us
-      setup.RequestTypeReservedBits = 0x40
-      setup.Request = COMM_CMD
-      setup.Value = COMM_SET_DURATION | COMM_IM | COMM_TYPE
-      setup.Index = 0x40
-
-      #ret = self.DoControlMessage(setup)
-
-      # disable strong pullup, but leave progrm pulse enabled (faster)
-      setup.RequestTypeReservedBits = 0x40
-      setup.Request = MODE_CMD
-      setup.Value = MOD_PULSE_EN
-      setup.Index = ENABLEPULSE_PRGE
-
-      #ret = self.DoControlMessage(setup)
 
       # return result of short check (XXX - return value correct?)
       return self.DS2490ShortCheck()
 
+   @trace
    def DS2490Reset(self):
       """
       Performs a hardware reset of the DS2490 equivalent to a power-on reset.
@@ -456,61 +458,44 @@ class DS2490:
       Source:
          libusbds2490.c
       """
-      self.logger.debug( 'DS2490Reset')
-      setup = SetupPacket()
 
-      # setup for reset
-      setup.RequestTypeReservedBits = 0x40
-      setup.Request = CONTROL_CMD
-      setup.Value = CTL_RESET_DEVICE
-      setup.Index = 0x00
+      # por reset
+      self.SendControlCommand(value=CTL_RESET_DEVICE, index=0)
 
-      ret = self.DoControlMessage(setup)
+      # set the strong pullup duration to infinite
+      self.SendControl(value=(COMM_SET_DURATION | COMM_IM), index=0)
 
-      if ret < 0 :
-         return False
+      # set the 12V pullup duration to 512us
+      self.SendControl(value=(COMM_SET_DURATION | COMM_IM | COMM_TYPE), index=0x40)
+
+      # disable strong pullup, but leave progrm pulse enabled (faster)
+      self.SendControlMode(value=MOD_PULSE_EN, index=ENABLEPULSE_PRGE)
+
       return True
 
+   @trace
    def DS2490GetStatus(self):
       buf = self._handle.bulkRead(1, 32, TIMEOUT_LIBUSB)
-      print 'got status: %s' % (repr(buf),)
       if len(buf) < 16:
          return None
       status = StatusPacket()
-      b2 = struct.pack('16B', *buf)
+      b2 = struct.pack('16B', *buf[:16])
       status.unpack(b2) # TODO: make sure CommResultCodes (string) handling is correct
-      #print str(status)
       return status
 
+   @trace
    def DS2490Write(self, buf):
-      # XXX 10/12 check endpoints
-      nbytes = self.devfile.write(buf)
+      ret = self._handle.bulkWrite(EP_DATA_OUT, buf, TIMEOUT_LIBUSB)
       return True
 
+   @trace
    def DS2490Read(self, buf_len):
-      #return self.devfile.read(buf_len)
-      howmuch = buf_len
-      data=""
-      while howmuch > 0:
-         #print "usb_bulk_read(%s,%d,%d,%d)" % (self.devfile.iface.device.handle, DS2490_EP3, buf_len, TIMEOUT_LIBUSB)
-         res,outstr=libusb.usb_bulk_read_wrapped(self.devfile.iface.device.handle, DS2490_EP3, buf_len, TIMEOUT_LIBUSB)
-         #print "usb_bulk_read(%s,%d,%d,%d)=%d,%s" % (self.devfile.iface.device.handle, DS2490_EP3, buf_len, TIMEOUT_LIBUSB, res, `outstr`)
-         if res<0:
-             if len(data)>0:
-                 return data
-             e=USBException()
-             raise e
-         if res==0:
-             return data
-         data+=outstr
-         howmuch-=len(outstr)
-         if howmuch and len(outstr)!=buf_len:
-             # short read, no more data
-             break
-
-      return data
+      ret = self._handle.bulkRead(EP_DATA_IN, buf_len, TIMEOUT_LIBUSB)
+      print '______ read:', repr(ret)
+      return ret
 
 
+   @trace
    def DS2490ShortCheck(self):
       """
       Check to see if there is a short on the 1-Write bus.
@@ -557,6 +542,7 @@ class DS2490:
       return (True, vpp)
 
    # owFirst, from libusbnet.c
+   @trace
    def owFirst(self, alarm_only = False):
       """
       Find the first device on the 1-Wire net
@@ -576,6 +562,7 @@ class DS2490:
       self._ResetSearch()
       return self.owNext(alarm_only)
 
+   @trace
    def owNext(self, alarm_only=False, do_reset=True):
       """
       The owNext function does a general search.
@@ -596,7 +583,6 @@ class DS2490:
          False - no new device was found. Either the last search was the last
          device or there are no devices on the 1-Wire Net
       """
-      self.logger.debug('owNext')
       ResetSearch = False
       rt = False
 
@@ -615,8 +601,10 @@ class DS2490:
          # if there are no parts on the 1-wire, return false
          if not self.owTouchReset():
             self._ResetSearch()
+            print 'no parts!'
             return False
 
+      print 'here!'
       # build the rom number to pass to the USB chip
       rom_buf = self._SerialNumber
 
@@ -636,14 +624,10 @@ class DS2490:
          return False
 
       # setup for search command call
-      setup = SetupPacket()
-      setup.RequestTypeReservedBits = 0x40
-      setup.Request = COMM_CMD
-      setup.Value = COMM_SEARCH_ACCESS | COMM_IM | COMM_SM | COMM_F | COMM_RTS
+      val = COMM_SEARCH_ACCESS | COMM_IM | COMM_SM | COMM_F | COMM_RTS
       # the number of devices to read (1) with the search command
-      setup.Index = 0x0100 | (search_cmd & 0x00ff)
-
-      ret = self.DoControlMessage(setup)
+      idx = 0x0100 | (search_cmd & 0x00ff)
+      ret = self.SendControl(idx, val)
 
       if ret < 0:
          # failure
@@ -728,3 +712,6 @@ def mkserial(num):
 
 if __name__ == '__main__':
    dev = DS2490()
+   dev.DS2490Reset()
+   dev.owFirst()
+   dev.GetIDs()
