@@ -11,7 +11,7 @@ setup(
     url = "http://code.google.com/p/pyonewire/",
     packages = [
       'pyonewire',
-      'pyonewire.core'
+      'pyonewire.core',
       'pyonewire.master',
     ],
     package_dir = {
