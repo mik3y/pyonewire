@@ -1,0 +1,35 @@
+pyonewire - Python bindings for OneWire devices
+Copyright 2008 mike wakerly <opensource@hoho.com>
+http://code.google.com/p/pyonewire/
+
+Background
+==========
+
+Pyonewire is a set of modules for working with OneWire busses and devices.
+
+The project currently provides a userspace driver for the DS2490 OneWire master
+adapter, which uses the usermode libusb library. Much of the initial code
+structure is derived from the Linux kernel w1 driver tree, with obviosu changes
+where python or OO features make them possible.
+
+Why pyonewire?
+==============
+
+The basic dependencies of this module -- libusb and Python -- are available on a
+variety of platforms. I wanted access to OneWire devices on both Linux and
+non-Linux platforms, and there didn't seem to be any reason to push the
+implementation into userspace.
+
+Installation Instructions
+=========================
+
+  $ python setup.py install
+
+You may need to run this command with root privileges.
+
+Reporting Bugs, Contact Information
+===================================
+
+Please use the official project page for reporting bugs and other contact:
+
+  http://code.google.com/p/pyonewire/

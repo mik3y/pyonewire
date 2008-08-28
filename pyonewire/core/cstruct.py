@@ -47,6 +47,11 @@ class cStruct:
    def __eq__(self, other):
       return self._values == other._values
 
+   def UnpackFromTuple(self, t):
+     assert len(t) == len(self._fields)
+     for i in xrange(len(self._fields)):
+       self._values[self._fields[i]] = t[i]
+
    def unpack(self, datastr):
       pos = 0
       if len(datastr) == 0:
@@ -76,25 +81,3 @@ class cStruct:
          else:
             ret += struct.pack(self._formats[f], self._values[f])
       return ret
-
-if __name__ == '__main__':
-   x = cStruct( [('h','shortguy',3), ('l','longguy',5)] )
-   y = cStruct( [('h','shortguy',3), ('l','longguy',5)] )
-
-   print x
-   print y
-   print 'x==y: %i' % (x==y,)
-   x.unpack(y.pack())
-   print 'x==y: %i' % (x==y,)
-   y = cStruct( [('h','shortguy',4), ('l','longguy',5)] )
-   print 'x==y: %i' % (x==y,)
-
-   print x.shortguy
-
-   x.shortguy = 7
-
-   print repr(x.pack())
-
-   print x
-
-   print str(x)

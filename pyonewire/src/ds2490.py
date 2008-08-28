@@ -245,6 +245,7 @@ class DS2490:
       self.USBLevel = 0 # TODO - fix to proper init values (?)
       self.USBSpeed = 0
       self._SerialNumber = 0L # XXX
+      self._handle = None
       self.owAcquire()
       self._ResetSearch()
 
@@ -274,13 +275,16 @@ class DS2490:
 
       self._device = GetDevice(DS2490.VENDORID, DS2490.PRODUCTID)
       if not self._device:
+        self.logger.warning('Could not acquire device')
         return False
+
       self.logger.debug('got device: %s' % self._device)
 
       self._handle = self._device.open()
-
       self._handle.reset()
 
+      self.logger.debug('setting config 0')
+      self._handle.setConfiguration(0)
       self._handle.claimInterface(DS2490.INTERFACEID)
       self.logger.debug('claimed interface')
 
@@ -369,7 +373,7 @@ class DS2490:
       idx = ONEWIREBUSSPEED_FLEXIBLE #XXX OVERDRIVE
       ret = self.SendControl(val, idx)
 
-      if ret < 0:
+      if False or ret < 0:
          # failure
          self.AdapterRecover()
          return False
@@ -408,35 +412,22 @@ class DS2490:
       else:
          return False
 
-   def _SendMessage(self, msg, timeout=TIMEOUT_LIBUSB):
-      print '--- SendMessage %x %x' % (msg.Value, msg.Index)
-      return self._handle.controlMsg(msg.RequestTypeReservedBits,
-                                     msg.Request, msg.Value, msg.Index,
-                                     timeout=timeout)
+   def _SendMessage(self, command, value, index, timeout=TIMEOUT_LIBUSB):
+      print '--- SendMessage %x %x' % (value, index)
+      return self._handle.controlMsg(0x40, command, buffer='', value=value,
+                                     index=index, timeout=timeout)
 
    @trace
    def SendControlCommand(self, value, index, timeout=TIMEOUT_LIBUSB):
-      msg = SetupPacket()
-      msg.Value = value
-      msg.Index = index
-      msg.Request = CONTROL_CMD
-      return self._SendMessage(msg, timeout)
+      return self._SendMessage(CONTROL_CMD, value, index, timeout)
 
    @trace
    def SendControl(self, value, index, timeout=TIMEOUT_LIBUSB):
-      msg = SetupPacket()
-      msg.Value = value
-      msg.Index = index
-      msg.Request = COMM_CMD
-      return self._SendMessage(msg, timeout)
+      return self._SendMessage(COMM_CMD, value, index, timeout)
 
    @trace
    def SendControlMode(self, value, index, timeout=TIMEOUT_LIBUSB):
-      msg = SetupPacket()
-      msg.Value = value
-      msg.Index = index
-      msg.Request = MODE_CMD
-      return self._SendMessage(msg, timeout)
+      return self._SendMessage(MODE_CMD, value, index, timeout)
 
    @trace
    def DS2490Detect(self):
@@ -713,5 +704,6 @@ def mkserial(num):
 if __name__ == '__main__':
    dev = DS2490()
    dev.DS2490Reset()
-   dev.owFirst()
+   print "XXX first:", dev.owFirst(), 'XXXX'
    dev.GetIDs()
+   print dev._SerialNumber
