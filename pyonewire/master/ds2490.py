@@ -261,7 +261,7 @@ class DS2490Master(GenericOneWireMaster.GenericOneWireMaster):
       self._intf = self._conf.interfaces[0][0]
       self._handle.setConfiguration(self._conf)
       self._handle.claimInterface(self._intf)
-      self._handle.setAltInterface(2)
+      self._handle.setAltInterface(3)
 
       # por reset
       self.SendControlCommand(value=CTL_RESET_DEVICE, index=0)
@@ -438,14 +438,14 @@ class DS2490Master(GenericOneWireMaster.GenericOneWireMaster):
      # The read data endpoint has a maximum size of 16 bytes. To support reads
      # of 2 or more ibuttons, we need to pull from it while the search command
      # is underway.
+     ids = []
      while True:
-       buf = self.RecvData(8)
-       ret += list(buf)
-       if len(ret) >= 8:
-         yield util.IdTupleToLong(ret[:8])
+       while len(ret) >= 8:
+         ids.append(util.IdTupleToLong(ret[:8]))
          ret = ret[8:]
        if last:
          break
+       ret += list(self.RecvData(8 * max))
        status = self.GetStatus()
        if status.StatusFlags & 0x20:
          last = True
@@ -453,6 +453,8 @@ class DS2490Master(GenericOneWireMaster.GenericOneWireMaster):
        count += 1
        if count >= 100:
          raise RuntimeError, "took too long to get status"
+     for b in ids:
+       yield b
 
 
 def mkserial(num):
