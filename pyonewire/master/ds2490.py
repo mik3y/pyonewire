@@ -29,6 +29,7 @@ import time
 import usb
 
 from pyonewire.core import cstruct
+from pyonewire.core import util
 from pyonewire.master import GenericOneWireMaster
 
 ### defines - from libusbds2490.c
@@ -260,7 +261,7 @@ class DS2490Master(GenericOneWireMaster.GenericOneWireMaster):
       self._intf = self._conf.interfaces[0][0]
       self._handle.setConfiguration(self._conf)
       self._handle.claimInterface(self._intf)
-      #self._handle.setAltInterface(self._intf)
+      self._handle.setAltInterface(2)
 
       # por reset
       self.SendControlCommand(value=CTL_RESET_DEVICE, index=0)
@@ -314,8 +315,6 @@ class DS2490Master(GenericOneWireMaster.GenericOneWireMaster):
    @trace
    def RecvData(self, size):
      raw = self._handle.bulkRead(EP_DATA_IN, size, TIMEOUT_LIBUSB)
-     assert len(raw) == size, "Asked %i got %i" % (size, len(raw))
-     # XXX add clear halt on error
      return raw
 
    @trace
@@ -421,6 +420,40 @@ class DS2490Master(GenericOneWireMaster.GenericOneWireMaster):
 
      return len(b2) != len(buf)
 
+   @trace
+   def Search(self, search_type=SEARCH_NORMAL, start=0, max=8):
+     self.Reset()
+     self.SendData('\x00'*8)
+     self.WaitStatus()
+
+     self._handle.clearHalt(EP_DATA_OUT)
+     val = COMM_SEARCH_ACCESS | COMM_IM | COMM_SM | COMM_F | COMM_RTS
+     index = (max << 8) | search_type
+     self.SendControl(val, index)
+
+     ret = []
+     count = 0
+     last = False
+
+     # The read data endpoint has a maximum size of 16 bytes. To support reads
+     # of 2 or more ibuttons, we need to pull from it while the search command
+     # is underway.
+     while True:
+       buf = self.RecvData(8)
+       ret += list(buf)
+       if len(ret) >= 8:
+         yield util.IdTupleToLong(ret[:8])
+         ret = ret[8:]
+       if last:
+         break
+       status = self.GetStatus()
+       if status.StatusFlags & 0x20:
+         last = True
+       time.sleep(0.01)
+       count += 1
+       if count >= 100:
+         raise RuntimeError, "took too long to get status"
+
 
 def mkserial(num):
    return ' '.join(['%02x' % ((num >> (8*i)) & 0xff) for i in range(8)])
@@ -429,4 +462,4 @@ def mkserial(num):
 if __name__ == '__main__':
    dev = DS2490Master()
    for d in dev.Search(dev.SEARCH_NORMAL):
-     print "found: %x" % d
+     print hex(d)
