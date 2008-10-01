@@ -423,6 +423,9 @@ class DS2490Master(GenericOneWireMaster.GenericOneWireMaster):
    @trace
    def Search(self, search_type=SEARCH_NORMAL, start=0, max=8):
      self.Reset()
+
+     self.SendControlCommand(value=CTL_RESET_DEVICE, index=0)
+
      self.SendData('\x00'*8)
      self.WaitStatus()
 
@@ -439,13 +442,14 @@ class DS2490Master(GenericOneWireMaster.GenericOneWireMaster):
      # of 2 or more ibuttons, we need to pull from it while the search command
      # is underway.
      ids = []
+     status = None
      while True:
        while len(ret) >= 8:
          ids.append(util.IdTupleToLong(ret[:8]))
          ret = ret[8:]
        if last:
          break
-       ret += list(self.RecvData(8 * max))
+       ret += list(self.RecvData(8))
        status = self.GetStatus()
        if status.StatusFlags & 0x20:
          last = True
