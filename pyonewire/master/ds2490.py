@@ -152,23 +152,23 @@ class UsbError(Exception):
   """Raised when a libusb operation returns an error"""
 
 def StatusPacket():
-   return cstruct.cStruct(( ('B', 'EnableFlags'),
-                            ('B', 'OneWireSpeed'),
-                            ('B', 'StrongPullUpDirection'),
-                            ('B', 'ProgPulseDuration'),
-                            ('B', 'PullDownSlewRate'),
-                            ('B', 'Write1LowTime'),
-                            ('B', 'DSOW0RecoveryTime'),
-                            ('B', 'Reserved1'),
-                            ('B', 'StatusFlags'),
-                            ('B', 'CurrentCommCmd1'),
-                            ('B', 'CurrentCommCmd2'),
-                            ('B', 'CommBufferStatus'),
-                            ('B', 'WriteBufferStatus'),
-                            ('B', 'ReadBufferStatus'),
-                            ('B', 'Reserved2'),
-                            ('B', 'Reserved3'),
-                         ))
+  return cstruct.cStruct(( ('B', 'EnableFlags'),
+                           ('B', 'OneWireSpeed'),
+                           ('B', 'StrongPullUpDirection'),
+                           ('B', 'ProgPulseDuration'),
+                           ('B', 'PullDownSlewRate'),
+                           ('B', 'Write1LowTime'),
+                           ('B', 'DSOW0RecoveryTime'),
+                           ('B', 'Reserved1'),
+                           ('B', 'StatusFlags'),
+                           ('B', 'CurrentCommCmd1'),
+                           ('B', 'CurrentCommCmd2'),
+                           ('B', 'CommBufferStatus'),
+                           ('B', 'WriteBufferStatus'),
+                           ('B', 'ReadBufferStatus'),
+                           ('B', 'Reserved2'),
+                           ('B', 'Reserved3'),
+                        ))
 
 
 def GetDevice(vendor_id, product_id):
@@ -182,238 +182,239 @@ def GetDevice(vendor_id, product_id):
 logging.basicConfig(level=logging.DEBUG)
 
 class DS2490Master(GenericOneWireMaster.GenericOneWireMaster):
-   VENDORID    = 0x04fa
-   PRODUCTID   = 0x2490
-   INTERFACEID = 0
-   SEARCH_NORMAL = 0xf0
-   SEARCH_ALARM = 0xec
-   def __init__(self):
-      GenericOneWireMaster.GenericOneWireMaster.__init__(self)
-      self._logger = logging.getLogger("ds2490")
-      self._device = None
-      self._handle = None
+  VENDORID    = 0x04fa
+  PRODUCTID   = 0x2490
+  INTERFACEID = 0
+  SEARCH_NORMAL = 0xf0
+  SEARCH_ALARM = 0xec
+  def __init__(self):
+    GenericOneWireMaster.GenericOneWireMaster.__init__(self)
+    self._logger = logging.getLogger("ds2490")
+    self._device = None
+    self._handle = None
 
-      self._device = GetDevice(self.VENDORID, self.PRODUCTID)
+    self._device = GetDevice(self.VENDORID, self.PRODUCTID)
 
-      if not self._device:
-        self._logger.fatal('Could not acquire device')
-        raise RuntimeError, "no device"
+    if not self._device:
+      self._logger.fatal('Could not acquire device')
+      raise RuntimeError, "no device"
 
-      self._handle = self._device.open()
-      self._handle.reset()
+    self._handle = self._device.open()
+    self._handle.reset()
 
-      self._conf = self._device.configurations[0]
-      self._intf = self._conf.interfaces[0][0]
-      self._handle.setConfiguration(self._conf)
-      self._handle.claimInterface(self._intf)
-      self._handle.setAltInterface(3)
+    self._conf = self._device.configurations[0]
+    self._intf = self._conf.interfaces[0][0]
+    self._handle.setConfiguration(self._conf)
+    self._handle.claimInterface(self._intf)
+    self._handle.setAltInterface(3)
 
-      self.Reset()
+    self.Reset()
 
-      if 0:
-        self._logger.debug('clearing endpoints')
-        for ep in (DS2490_EP1, DS2490_EP2, DS2490_EP3):
-          self._handle.clearHalt(ep)
+    if 0:
+      self._logger.debug('clearing endpoints')
+      for ep in (DS2490_EP1, DS2490_EP2, DS2490_EP3):
+        self._handle.clearHalt(ep)
 
-      self._logger.debug('completed init')
+    self._logger.debug('completed init')
 
-   def _SendMessage(self, command, value, index, timeout=TIMEOUT_LIBUSB):
-      ret = self._handle.controlMsg(requestType=0x40, request=command, buffer='', value=value,
-                                    index=index, timeout=timeout)
-      if ret:
-        raise UsbError, "Error while sending control message: %s" % (ret,)
+  def _SendMessage(self, command, value, index, timeout=TIMEOUT_LIBUSB):
+    ret = self._handle.controlMsg(requestType=0x40, request=command, buffer='',
+                                  value=value, index=index, timeout=timeout)
+    if ret:
+      raise UsbError, "Error while sending control message: %s" % (ret,)
 
-   @trace
-   def SendControlCommand(self, value, index, timeout=TIMEOUT_LIBUSB):
-      self._SendMessage(CONTROL_CMD, value, index, timeout)
+  @trace
+  def SendControlCommand(self, value, index, timeout=TIMEOUT_LIBUSB):
+    self._SendMessage(CONTROL_CMD, value, index, timeout)
 
-   @trace
-   def SendControlMode(self, value, index, timeout=TIMEOUT_LIBUSB):
-      self._SendMessage(MODE_CMD, value, index, timeout)
+  @trace
+  def SendControlMode(self, value, index, timeout=TIMEOUT_LIBUSB):
+    self._SendMessage(MODE_CMD, value, index, timeout)
 
-   @trace
-   def SendControl(self, value, index, timeout=TIMEOUT_LIBUSB):
-      self._SendMessage(COMM_CMD, value, index, timeout)
+  @trace
+  def SendControl(self, value, index, timeout=TIMEOUT_LIBUSB):
+    self._SendMessage(COMM_CMD, value, index, timeout)
 
-   @trace
-   def GetStatus(self):
-     buf_len = 64
-     raw = self._handle.bulkRead(EP_STATUS, buf_len, TIMEOUT_LIBUSB)
-     status = StatusPacket()
-     status.UnpackFromTuple(raw[:16])
-     ST_EPOF = 0x80
-     if status.StatusFlags & ST_EPOF:
-       self._logger.info('Resetting device after ST_EPOF')
-       self.SendControlCommand(CTL_RESET_DEVICE, 0)
-     return status
+  @trace
+  def GetStatus(self):
+    buf_len = 64
+    raw = self._handle.bulkRead(EP_STATUS, buf_len, TIMEOUT_LIBUSB)
+    status = StatusPacket()
+    status.UnpackFromTuple(raw[:16])
+    ST_EPOF = 0x80
+    if status.StatusFlags & ST_EPOF:
+      self._logger.info('Resetting device after ST_EPOF')
+      self.SendControlCommand(CTL_RESET_DEVICE, 0)
+    return status
 
-   @trace
-   def RecvData(self, size):
-     raw = self._handle.bulkRead(EP_DATA_IN, size, TIMEOUT_LIBUSB)
-     return raw
+  @trace
+  def RecvData(self, size):
+    raw = self._handle.bulkRead(EP_DATA_IN, size, TIMEOUT_LIBUSB)
+    return raw
 
-   @trace
-   def SendData(self, buf):
-     return self._handle.bulkWrite(EP_DATA_OUT, buf, TIMEOUT_LIBUSB)
+  @trace
+  def SendData(self, buf):
+    return self._handle.bulkWrite(EP_DATA_OUT, buf, TIMEOUT_LIBUSB)
 
-   @trace
-   def WaitStatus(self):
-     count = 0
-     status = None
-     while True:
-       status = self.GetStatus()
-       count += 1
-       time.sleep(0.01)
-       if status.StatusFlags & 0x20:
-         break
-       if count >= 100:
-         raise RuntimeError, "took too long to get status"
-     return status
+  @trace
+  def WaitStatus(self):
+    count = 0
+    status = None
+    while True:
+      status = self.GetStatus()
+      count += 1
+      time.sleep(0.01)
+      if status.StatusFlags & 0x20:
+        break
+      if count >= 100:
+        raise RuntimeError, "took too long to get status"
+    return status
 
-   @trace
-   def Reset(self):
-     # por reset
-     self.SendControlCommand(value=CTL_RESET_DEVICE, index=0)
+  @trace
+  def Reset(self):
+    # por reset
+    self.SendControlCommand(value=CTL_RESET_DEVICE, index=0)
 
-     # set speed
-     self.SendControl(0x43, ONEWIREBUSSPEED_REGULAR)
+    # set speed
+    self.SendControl(0x43, ONEWIREBUSSPEED_REGULAR)
 
-     # set the strong pullup duration to infinite
-     self.SendControl(value=(COMM_SET_DURATION | COMM_IM), index=0)
+    # set the strong pullup duration to infinite
+    self.SendControl(value=(COMM_SET_DURATION | COMM_IM), index=0)
 
-     # set the 12V pullup duration to 512us
-     self.SendControl(value=(COMM_SET_DURATION | COMM_IM | COMM_TYPE), index=0x40)
+    # set the 12V pullup duration to 512us
+    self.SendControl(value=(COMM_SET_DURATION | COMM_IM | COMM_TYPE),
+                     index=0x40)
 
-     # disable strong pullup, but leave progrm pulse enabled (faster)
-     self.SendControlMode(value=MOD_PULSE_EN, index=ENABLEPULSE_PRGE)
+    # disable strong pullup, but leave progrm pulse enabled (faster)
+    self.SendControlMode(value=MOD_PULSE_EN, index=ENABLEPULSE_PRGE)
 
-     return self.WaitStatus()
+    return self.WaitStatus()
 
-   @trace
-   def StartPulse(self, delay):
-     outdelay = 1 + (delay >> 4)
-     self.SendControlMode(MOD_PULSE_EN, ENABLEPULSE_SPUE)
-     self.SendControl(COMM_SET_DURATION | COMM_IM, outdelay)
-     self.SendControl(COMM_PULSE | COMM_IM | COMM_F, 0)
-     time.sleep(delay/1000.0) # mdelay
-     return self.WaitStatus()
+  @trace
+  def StartPulse(self, delay):
+    outdelay = 1 + (delay >> 4)
+    self.SendControlMode(MOD_PULSE_EN, ENABLEPULSE_SPUE)
+    self.SendControl(COMM_SET_DURATION | COMM_IM, outdelay)
+    self.SendControl(COMM_PULSE | COMM_IM | COMM_F, 0)
+    time.sleep(delay/1000.0) # mdelay
+    return self.WaitStatus()
 
-   @trace
-   def TouchBit(self, bit):
-     val = COMM_BIT_IO | COMM_IM
-     if bit:
-       val |= COMM_D
+  @trace
+  def TouchBit(self, bit):
+    val = COMM_BIT_IO | COMM_IM
+    if bit:
+      val |= COMM_D
 
-     self.SendControl(val, 0)
-     count = 0
-     while True:
-       count += 1
-       status = self.WaitStatus()
-       cmd = status.CurrentCommCmd1 | (status.CurrentCommCmd2 << 8)
-       if (cmd == val) or count >= 10:
-         break
-     if count >= 10:
-       raise ValueError, "Too many tries"
+    self.SendControl(val, 0)
+    count = 0
+    while True:
+      count += 1
+      status = self.WaitStatus()
+      cmd = status.CurrentCommCmd1 | (status.CurrentCommCmd2 << 8)
+      if (cmd == val) or count >= 10:
+        break
+    if count >= 10:
+      raise ValueError, "Too many tries"
 
-     ret = self.RecvData(1)
-     return ret[0] 
+    ret = self.RecvData(1)
+    return ret[0] 
 
-   @trace
-   def WriteBit(self, bit):
-     val = COMM_BIT_IO | COMM_IM
-     if bit:
-       val |= COMM_D
-     self.SendControl(val)
+  @trace
+  def WriteBit(self, bit):
+    val = COMM_BIT_IO | COMM_IM
+    if bit:
+      val |= COMM_D
+    self.SendControl(val)
 
-     return self.WaitStatus()
+    return self.WaitStatus()
 
-   @trace
-   def WriteByte(self, byte):
-     self.SendControl(COMM_BYTE_IO | COMM_IM | COMM_SPU, byte)
-     st = self.WaitStatus()
-     rbyte = self.RecvData(1)
-     self.StartPulse(PULLUP_PULSE_DURATION)
-     if len(rbyte) == 1:
-       return byte != rbyte[0]
-     else:
-       return False
+  @trace
+  def WriteByte(self, byte):
+    self.SendControl(COMM_BYTE_IO | COMM_IM | COMM_SPU, byte)
+    st = self.WaitStatus()
+    rbyte = self.RecvData(1)
+    self.StartPulse(PULLUP_PULSE_DURATION)
+    if len(rbyte) == 1:
+      return byte != rbyte[0]
+    else:
+      return False
 
-   @trace
-   def ReadByte(self):
-     self.SendControl(COMM_BYTE_IO | COMM_IM, 0xff)
-     self.WaitStatus()
-     ret = self.RecvData(1)
-     return ret[0]
+  @trace
+  def ReadByte(self):
+    self.SendControl(COMM_BYTE_IO | COMM_IM, 0xff)
+    self.WaitStatus()
+    ret = self.RecvData(1)
+    return ret[0]
 
-   @trace
-   def ReadBlock(self, blocklen):
-     if blocklen > (64*1024):
-       raise ValueError, "Len too long"
+  @trace
+  def ReadBlock(self, blocklen):
+    if blocklen > (64*1024):
+      raise ValueError, "Len too long"
 
-     buf = [0xff]*blocklen
-     self.SendData(buf)
-     self.SendControl(COMM_BLOCK_IO | COMM_IM | COMM_SPU, blocklen)
-     self.WaitStatus()
+    buf = [0xff]*blocklen
+    self.SendData(buf)
+    self.SendControl(COMM_BLOCK_IO | COMM_IM | COMM_SPU, blocklen)
+    self.WaitStatus()
 
-     return self.RecvData(blocklen)
+    return self.RecvData(blocklen)
 
-   @trace
-   def WriteBlock(self, buf):
-     self.SendData(buf)
-     self.WaitStatus()
-     self.SendControl(COMM_BLOCK_IO | COMM_IM | COMM_SPU, len(buf))
-     self.WaitStatus()
-     b2 = self.RecvData(len(buf))
-     self.StartPulse(PULLUP_PULSE_DURATION)
+  @trace
+  def WriteBlock(self, buf):
+    self.SendData(buf)
+    self.WaitStatus()
+    self.SendControl(COMM_BLOCK_IO | COMM_IM | COMM_SPU, len(buf))
+    self.WaitStatus()
+    b2 = self.RecvData(len(buf))
+    self.StartPulse(PULLUP_PULSE_DURATION)
 
-     return len(b2) != len(buf)
+    return len(b2) != len(buf)
 
-   @trace
-   def Search(self, search_type=SEARCH_NORMAL, start=0, max=8):
-     self.Reset()
+  @trace
+  def Search(self, search_type=SEARCH_NORMAL, start=0, max=8):
+    self.Reset()
 
-     self.SendControlCommand(value=CTL_RESET_DEVICE, index=0)
+    self.SendControlCommand(value=CTL_RESET_DEVICE, index=0)
 
-     self.SendData('\x00'*8)
-     self.WaitStatus()
+    self.SendData('\x00'*8)
+    self.WaitStatus()
 
-     val = COMM_SEARCH_ACCESS | COMM_IM | COMM_SM | COMM_F | COMM_RTS
-     index = (max << 8) | search_type
-     self.SendControl(val, index)
+    val = COMM_SEARCH_ACCESS | COMM_IM | COMM_SM | COMM_F | COMM_RTS
+    index = (max << 8) | search_type
+    self.SendControl(val, index)
 
-     ret = []
-     count = 0
-     last = False
+    ret = []
+    count = 0
+    last = False
 
-     # The read data endpoint has a maximum size of 16 bytes. To support reads
-     # of 2 or more ibuttons, we need to pull from it while the search command
-     # is underway.
-     ids = []
-     status = None
-     while True:
-       while len(ret) >= 8:
-         ids.append(util.IdTupleToLong(ret[:8]))
-         ret = ret[8:]
-       if last:
-         break
-       ret += list(self.RecvData(8))
-       status = self.GetStatus()
-       if status.StatusFlags & 0x20:
-         last = True
-       time.sleep(0.01)
-       count += 1
-       if count >= 100:
-         raise RuntimeError, "took too long to get status"
-     for b in ids:
-       yield b
+    # The read data endpoint has a maximum size of 16 bytes. To support reads
+    # of 2 or more ibuttons, we need to pull from it while the search command
+    # is underway.
+    ids = []
+    status = None
+    while True:
+      while len(ret) >= 8:
+        ids.append(util.IdTupleToLong(ret[:8]))
+        ret = ret[8:]
+      if last:
+        break
+      ret += list(self.RecvData(8))
+      status = self.GetStatus()
+      if status.StatusFlags & 0x20:
+        last = True
+      time.sleep(0.01)
+      count += 1
+      if count >= 100:
+        raise RuntimeError, "took too long to get status"
+    for b in ids:
+      yield b
 
 
 def mkserial(num):
-   return ' '.join(['%02x' % ((num >> (8*i)) & 0xff) for i in range(8)])
+  return ' '.join(['%02x' % ((num >> (8*i)) & 0xff) for i in range(8)])
 
 
 if __name__ == '__main__':
-   dev = DS2490Master()
-   while True:
-     for d in dev.Search(dev.SEARCH_NORMAL):
-       print hex(d)
+  dev = DS2490Master()
+  while True:
+    for d in dev.Search(dev.SEARCH_NORMAL):
+      print hex(d)
