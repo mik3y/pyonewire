@@ -114,7 +114,7 @@ class GenericOneWireMaster(object):
     """
     raise NotImplementedError
 
-  def Triplet(self, dbit):
+  def Triplet(self, bdir):
     """Combination of two reads and smart write for ROM search.
 
     Args
@@ -163,9 +163,7 @@ class GenericOneWireMaster(object):
 
     desc_bit = 64
 
-    ignore_families = [0x81]
-
-    def PickSearchBit(i, desc_bit, last_rn):
+    def pick_search_bit(i, desc_bit, last_rn):
       if i == desc_bit:
         # took 0 path last time, so take 1 path
         return 1
@@ -182,11 +180,11 @@ class GenericOneWireMaster(object):
       # Reset bus
       self.Reset()
 
-      ret = self.WriteByte(search_type)
+      self.WriteByte(search_type)
 
       for i in xrange(64):
         # Determine the direction/search bit
-        search_bit = PickSearchBit(i, desc_bit, last_rn)
+        search_bit = pick_search_bit(i, desc_bit, last_rn)
 
         # read two bits and write one bit
         triplet_ret = self.Triplet(search_bit)
