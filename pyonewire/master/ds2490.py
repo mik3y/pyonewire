@@ -32,17 +32,6 @@ from pyonewire.core import cstruct
 from pyonewire.core import util
 from pyonewire.master import GenericOneWireMaster
 
-### defines - from libusbds2490.c
-
-# status flags
-STATUSFLAGS_SPUA = 0x01  # if set Strong Pull-up is active
-STATUSFLAGS_PRGA = 0x02  # if set a 12V programming pulse is being generated
-STATUSFLAGS_12VP = 0x04  # if set the external 12V programming voltage is present
-STATUSFLAGS_PMOD = 0x08  # if set the DS2490 powered from USB and external sources
-STATUSFLAGS_HALT = 0x10  # if set the DS2490 is currently halted
-STATUSFLAGS_IDLE = 0x20  # if set the DS2490 is currently idle
-
-
 # Request byte, Command Type Code Constants 
 CONTROL_CMD = 0x00
 COMM_CMD = 0x01
@@ -92,12 +81,6 @@ COMM_F = 0x0800
 COMM_ICP = 0x0200
 COMM_RST = 0x0100
 
-# Read Straight command, special bits 
-COMM_READ_STRAIGHT_NTF = 0x0008
-COMM_READ_STRAIGHT_ICP = 0x0004
-COMM_READ_STRAIGHT_RST = 0x0002
-COMM_READ_STRAIGHT_IM = 0x0001
-
 # Value field COMM Command options (0-F plus assorted bits)
 COMM_ERROR_ESCAPE = 0x0601
 COMM_SET_DURATION = 0x0012
@@ -139,54 +122,16 @@ MOD_DSOW0_TREC = 0x0007
 # duration of strong pullup, in ms
 PULLUP_PULSE_DURATION = 750
 
-TIMEOUT_LIBUSB = 5000
-
-### defines - from ownet.h
-WRITE_FUNCTION = 1
-READ_FUNCTION = 0
-
-# error codes
-READ_ERROR = 1
-INVALID_DIR = 2
-NO_FILE = 3
-WRITE_ERROR = 4
-WRONG_TYPE = 5
-FILE_TOO_BIG = 6
-
-# mode bit flags
-MODE_NORMAL = 0x00
-MODE_OVERDRIVE = 0x01
-MODE_STRONG5 = 0x02
-MODE_PROGRAM = 0x04
-MODE_BREAK = 0x08
-
-# output flags
-LV_ALWAYS = 2
-LV_OPTIONAL = 1
-LV_VERBOSE = 0
-
-
-### defines - libusbllnk.c
-FAMILY_CODE_04_ALARM_TOUCHRESET_COMPLIANCE = 1
-
+TIMEOUT_LIBUSB = 1000
 
 ### defines - libusbds2490.h
 DS2490_EP1 = 0x81
 DS2490_EP2 = 0x02
 DS2490_EP3 = 0x83
-# Result Registers
-ONEWIREDEVICEDETECT = 0xA5  # 1-Wire device detected on bus
-COMMCMDERRORRESULT_NRS = 0x01  # if set 1-WIRE RESET did not reveal a Presence Pulse or SET PATH did not get a Presence Pulse from the branch to be connected
-COMMCMDERRORRESULT_SH  = 0x02  # if set 1-WIRE RESET revealed a short on the 1-Wire bus or the SET PATH couln not connect a branch due to short
-COMMCMDERRORRESULT_APP = 0x04  # if set a 1-WIRE RESET revealed an Alarming Presence Pulse
-COMMCMDERRORRESULT_VPP =          0x08  # if set during a PULSE with TYPE=1 or WRITE EPROM command the 12V programming pulse not seen on 1-Wire bus
-COMMCMDERRORRESULT_CMP =          0x10  # if set there was an error reading confirmation byte of SET PATH or WRITE EPROM was unsuccessful
-COMMCMDERRORRESULT_CRC =          0x20  # if set a CRC occurred for one of the commands: WRITE SRAM PAGE, WRITE EPROM, READ EPROM, READ CRC PROT PAGE, or READ REDIRECT PAGE W/CRC
-COMMCMDERRORRESULT_RDP =          0x40  # if set READ REDIRECT PAGE WITH CRC encountered a redirected page
-COMMCMDERRORRESULT_EOS =          0x80  # if set SEARCH ACCESS with SM=1 ended sooner than expected with too few ROM IDs
 
 TRACE = False
 TRACE_LEVEL = 0
+
 def trace(fn):
   def wrapped(*args, **kwargs):
     global TRACE
@@ -263,17 +208,7 @@ class DS2490Master(GenericOneWireMaster.GenericOneWireMaster):
       self._handle.claimInterface(self._intf)
       self._handle.setAltInterface(3)
 
-      # por reset
-      self.SendControlCommand(value=CTL_RESET_DEVICE, index=0)
-
-      # set the strong pullup duration to infinite
-      self.SendControl(value=(COMM_SET_DURATION | COMM_IM), index=0)
-
-      # set the 12V pullup duration to 512us
-      self.SendControl(value=(COMM_SET_DURATION | COMM_IM | COMM_TYPE), index=0x40)
-
-      # disable strong pullup, but leave progrm pulse enabled (faster)
-      self.SendControlMode(value=MOD_PULSE_EN, index=ENABLEPULSE_PRGE)
+      self.Reset()
 
       if 0:
         self._logger.debug('clearing endpoints')
@@ -337,8 +272,21 @@ class DS2490Master(GenericOneWireMaster.GenericOneWireMaster):
 
    @trace
    def Reset(self):
-     SPEED_NORMAL = 0x00
-     self.SendControl(0x43, SPEED_NORMAL)
+     # por reset
+     self.SendControlCommand(value=CTL_RESET_DEVICE, index=0)
+
+     # set speed
+     self.SendControl(0x43, ONEWIREBUSSPEED_REGULAR)
+
+     # set the strong pullup duration to infinite
+     self.SendControl(value=(COMM_SET_DURATION | COMM_IM), index=0)
+
+     # set the 12V pullup duration to 512us
+     self.SendControl(value=(COMM_SET_DURATION | COMM_IM | COMM_TYPE), index=0x40)
+
+     # disable strong pullup, but leave progrm pulse enabled (faster)
+     self.SendControlMode(value=MOD_PULSE_EN, index=ENABLEPULSE_PRGE)
+
      return self.WaitStatus()
 
    @trace
@@ -429,7 +377,6 @@ class DS2490Master(GenericOneWireMaster.GenericOneWireMaster):
      self.SendData('\x00'*8)
      self.WaitStatus()
 
-     self._handle.clearHalt(EP_DATA_OUT)
      val = COMM_SEARCH_ACCESS | COMM_IM | COMM_SM | COMM_F | COMM_RTS
      index = (max << 8) | search_type
      self.SendControl(val, index)
@@ -467,5 +414,6 @@ def mkserial(num):
 
 if __name__ == '__main__':
    dev = DS2490Master()
-   for d in dev.Search(dev.SEARCH_NORMAL):
-     print hex(d)
+   while True:
+     for d in dev.Search(dev.SEARCH_NORMAL):
+       print hex(d)
