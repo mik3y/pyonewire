@@ -163,6 +163,8 @@ class GenericOneWireMaster(object):
 
     desc_bit = 64
 
+    ret = []
+
     def pick_search_bit(i, desc_bit, last_rn):
       if i == desc_bit:
         # took 0 path last time, so take 1 path
@@ -205,4 +207,6 @@ class GenericOneWireMaster(object):
         if desc_bit == last_zero or last_zero < 0:
           last_device = True
         desc_bit = last_zero
-        yield rn
+        ret.append(rn)
+
+    return ret
