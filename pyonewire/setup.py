@@ -4,7 +4,7 @@ from distutils.core import setup
 
 setup(
     name = "pyonewire",
-    version = "0.5.0",
+    version = "0.5.1",
     description = "Python interface to 1-Wire devices",
     author = "mike wakerly",
     author_email = "opensource@hoho.com",
