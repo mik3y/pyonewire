@@ -38,6 +38,26 @@ COMM_CMD = 0x01
 MODE_CMD = 0x02
 TEST_CMD = 0x03
 
+# Status flags
+ST_SPUA = 0x01  # strong pull-up is active
+ST_PRGA = 0x02  # 12v programming pulse is being generated
+ST_12VP = 0x04  # external 12v programming voltage is present
+ST_PMOD = 0x08  # ds2490 powered from USB and external sources
+ST_HALT = 0x10  # ds2490 is currently halted
+ST_IDLE = 0x20  # ds2490 is currently idle
+ST_EPOF = 0x80
+
+# Result Register flags
+RR_DETECT = 0xA5  # new device detected
+RR_NRS = 0x01  # no response to search
+RR_SH = 0x02  # short on reset or set path
+RR_APP = 0x04  # alarming presence on reset
+RR_VPP = 0x08  # 12v expected not seen
+RR_CMP = 0x10  # compare error
+RR_CRC = 0x20  # crc error detected
+RR_RDP = 0x40  # redirected page
+RR_EOS = 0x80  # end of search error
+
 # Value field, Control commands
 # Control Command Code Constants 
 CTL_RESET_DEVICE = 0x0000
@@ -134,7 +154,6 @@ TRACE_LEVEL = 0
 
 def trace(fn):
   def wrapped(*args, **kwargs):
-    global TRACE
     global TRACE_LEVEL
     if not TRACE:
       return fn(*args, **kwargs)
@@ -206,14 +225,9 @@ class DS2490Master(GenericOneWireMaster.GenericOneWireMaster):
     self._intf = self._conf.interfaces[0][0]
     self._handle.setConfiguration(self._conf)
     self._handle.claimInterface(self._intf)
-    self._handle.setAltInterface(3)
+    self._handle.setAltInterface(1)
 
     self.Reset()
-
-    if 0:
-      self._logger.debug('clearing endpoints')
-      for ep in (DS2490_EP1, DS2490_EP2, DS2490_EP3):
-        self._handle.clearHalt(ep)
 
     self._logger.debug('completed init')
 
@@ -237,19 +251,24 @@ class DS2490Master(GenericOneWireMaster.GenericOneWireMaster):
 
   @trace
   def GetStatus(self):
-    buf_len = 64
-    raw = self._handle.bulkRead(EP_STATUS, buf_len, TIMEOUT_LIBUSB)
+    raw = self._handle.bulkRead(EP_STATUS, 32, TIMEOUT_LIBUSB)
     status = StatusPacket()
     status.UnpackFromTuple(raw[:16])
-    ST_EPOF = 0x80
+    result_regs = raw[16:]
+    if result_regs:
+      self._logger.info('result regs: %s' % repr(result_regs))
     if status.StatusFlags & ST_EPOF:
       self._logger.info('Resetting device after ST_EPOF')
       self.SendControlCommand(CTL_RESET_DEVICE, 0)
-    return status
+    return status, result_regs
 
   @trace
   def RecvData(self, size):
-    raw = self._handle.bulkRead(EP_DATA_IN, size, TIMEOUT_LIBUSB)
+    try:
+      raw = self._handle.bulkRead(EP_DATA_IN, size, TIMEOUT_LIBUSB)
+    except usb.USBError:
+      print self.WaitStatus()
+      raise
     return raw
 
   @trace
@@ -261,10 +280,10 @@ class DS2490Master(GenericOneWireMaster.GenericOneWireMaster):
     count = 0
     status = None
     while True:
-      status = self.GetStatus()
+      status, regs = self.GetStatus()
       count += 1
       time.sleep(0.01)
-      if status.StatusFlags & 0x20:
+      if status.StatusFlags & ST_IDLE:
         break
       if count >= 100:
         raise RuntimeError, "took too long to get status"
@@ -276,7 +295,7 @@ class DS2490Master(GenericOneWireMaster.GenericOneWireMaster):
     self.SendControlCommand(value=CTL_RESET_DEVICE, index=0)
 
     # set speed
-    self.SendControl(0x43, ONEWIREBUSSPEED_REGULAR)
+    self.SendControl(0x43, ONEWIREBUSSPEED_FLEXIBLE)
 
     # set the strong pullup duration to infinite
     self.SendControl(value=(COMM_SET_DURATION | COMM_IM), index=0)
@@ -321,7 +340,7 @@ class DS2490Master(GenericOneWireMaster.GenericOneWireMaster):
 
   @trace
   def WriteBit(self, bit):
-    val = COMM_BIT_IO | COMM_IM
+    val = COMM_BIT_IO | COMM_IM | COMM_ICP
     if bit:
       val |= COMM_D
     self.SendControl(val)
@@ -361,7 +380,6 @@ class DS2490Master(GenericOneWireMaster.GenericOneWireMaster):
   @trace
   def WriteBlock(self, buf):
     self.SendData(buf)
-    self.WaitStatus()
     self.SendControl(COMM_BLOCK_IO | COMM_IM | COMM_SPU, len(buf))
     self.WaitStatus()
     b2 = self.RecvData(len(buf))
@@ -370,15 +388,18 @@ class DS2490Master(GenericOneWireMaster.GenericOneWireMaster):
     return len(b2) != len(buf)
 
   @trace
-  def Search(self, search_type=SEARCH_NORMAL, start=0, max=8):
+  def Search(self, search_type=SEARCH_NORMAL, max=0):
     self.Reset()
 
-    self.SendControlCommand(value=CTL_RESET_DEVICE, index=0)
+    # Hardware search command is not working properly when more than one device
+    # is attached.
+    if True:
+      return GenericOneWireMaster.GenericOneWireMaster.Search(self, search_type)
 
     self.SendData('\x00'*8)
     self.WaitStatus()
 
-    val = COMM_SEARCH_ACCESS | COMM_IM | COMM_SM | COMM_F | COMM_RTS
+    val = COMM_SEARCH_ACCESS | COMM_IM | COMM_SM | COMM_F
     index = (max << 8) | search_type
     self.SendControl(val, index)
 
@@ -398,15 +419,22 @@ class DS2490Master(GenericOneWireMaster.GenericOneWireMaster):
       if last:
         break
       ret += list(self.RecvData(8))
-      status = self.GetStatus()
-      if status.StatusFlags & 0x20:
+      status, regs = self.GetStatus()
+      if status.StatusFlags & ST_IDLE:
         last = True
+      for val in regs:
+        if val == RR_DETECT:
+          self._logger.info('new device detected')
+          continue
+        elif (val & RR_NRS) or (val & RR_EOS):
+          self._logger.warning('NRS error')
+          last = True
       time.sleep(0.01)
       count += 1
       if count >= 100:
         raise RuntimeError, "took too long to get status"
-    for b in ids:
-      yield b
+
+    return ibs
 
 
 def mkserial(num):
@@ -416,5 +444,9 @@ def mkserial(num):
 if __name__ == '__main__':
   dev = DS2490Master()
   while True:
+    printed = False
     for d in dev.Search(dev.SEARCH_NORMAL):
       print hex(d)
+      printed = True
+    if printed:
+      print ''
