@@ -9,16 +9,15 @@ Pyonewire is a set of modules for working with OneWire busses and devices.
 
 The project currently provides a userspace driver for the DS2490 OneWire master
 adapter, which uses the usermode libusb library. Much of the initial code
-structure is derived from the Linux kernel w1 driver tree, with obviosu changes
+structure is derived from the Linux kernel w1 driver tree, with obvious changes
 where python or OO features make them possible.
 
 Why pyonewire?
 ==============
 
 The basic dependencies of this module -- libusb and Python -- are available on a
-variety of platforms. I wanted access to OneWire devices on both Linux and
-non-Linux platforms, and there didn't seem to be any reason to push the
-implementation into userspace.
+variety of platforms. My original goal was to access to OneWire devices from
+various Python programs on Linux and non-Linux platforms.
 
 Installation Instructions
 =========================
