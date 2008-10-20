@@ -32,7 +32,7 @@ from pyonewire.core import cstruct
 from pyonewire.core import util
 from pyonewire.master import GenericOneWireMaster
 
-# Request byte, Command Type Code Constants 
+# Request codes
 CONTROL_CMD = 0x00
 COMM_CMD = 0x01
 MODE_CMD = 0x02
@@ -59,7 +59,7 @@ RR_RDP = 0x40  # redirected page
 RR_EOS = 0x80  # end of search error
 
 # Value field, Control commands
-# Control Command Code Constants 
+# Control Command Code Constants
 CTL_RESET_DEVICE = 0x0000
 CTL_START_EXE = 0x0001
 CTL_RESUME_EXE = 0x0002
@@ -72,14 +72,13 @@ CTL_FLUSH_RCV_BUFFER = 0x0008
 CTL_FLUSH_XMT_BUFFER = 0x0009
 CTL_GET_COMM_CMDS = 0x000A
 
+# USB endpoints
 EP_CONTROL = 0
 EP_STATUS = 1
 EP_DATA_OUT = 2
 EP_DATA_IN = 3
 
 # Value field COMM Command options
-
-# COMM Bits (bitwise or into COMM commands to build full value byte pairs)
 # Byte 1
 COMM_TYPE = 0x0008
 COMM_SE = 0x0008
@@ -143,11 +142,6 @@ MOD_DSOW0_TREC = 0x0007
 PULLUP_PULSE_DURATION = 750
 
 TIMEOUT_LIBUSB = 1000
-
-### defines - libusbds2490.h
-DS2490_EP1 = 0x81
-DS2490_EP2 = 0x02
-DS2490_EP3 = 0x83
 
 TRACE = False
 TRACE_LEVEL = 0
